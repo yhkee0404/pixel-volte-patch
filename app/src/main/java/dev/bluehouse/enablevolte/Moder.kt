@@ -99,7 +99,7 @@ class CarrierModer(
         get() {
             val sub = this.loadCachedInterface { sub }
             try {
-                return sub.getActiveSubscriptionInfoList(null, null, true)
+                return sub.getActiveSubscriptionInfoList(null, null, true) ?: emptyList()
             } catch (e: NoSuchMethodError) {}
             return try {
                 val getActiveSubscriptionInfoListMethod =
@@ -108,14 +108,14 @@ class CarrierModer(
                         String::class.java,
                         String::class.java,
                     )
-                (getActiveSubscriptionInfoListMethod.invoke(sub, null, null) as List<SubscriptionInfo>)
+                (getActiveSubscriptionInfoListMethod.invoke(sub, null, null) as? List<SubscriptionInfo>) ?: emptyList()
             } catch (e: NoSuchMethodException) {
                 val getActiveSubscriptionInfoListMethod =
                     sub.javaClass.getMethod(
                         "getActiveSubscriptionInfoList",
                         String::class.java,
                     )
-                (getActiveSubscriptionInfoListMethod.invoke(sub, null) as List<SubscriptionInfo>)
+                (getActiveSubscriptionInfoListMethod.invoke(sub, null) as? List<SubscriptionInfo>) ?: emptyList()
             }
         }
 
