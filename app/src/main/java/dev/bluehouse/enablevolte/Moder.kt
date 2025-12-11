@@ -98,18 +98,24 @@ class CarrierModer(
     val subscriptions: List<SubscriptionInfo>
         get() {
             val sub = this.loadCachedInterface { sub }
+            try {
+                return sub.getActiveSubscriptionInfoList(null, null, true)
+            } catch (e: NoSuchMethodError) {}
             return try {
-                sub.getActiveSubscriptionInfoList(null, null, true)
-            } catch (e: NoSuchMethodError) {
-                // FIXME: lift up reflect as soon as official source code releases
                 val getActiveSubscriptionInfoListMethod =
                     sub.javaClass.getMethod(
                         "getActiveSubscriptionInfoList",
                         String::class.java,
                         String::class.java,
-                        Boolean::class.java,
                     )
-                (getActiveSubscriptionInfoListMethod.invoke(sub, null, null, false) as List<SubscriptionInfo>)
+                (getActiveSubscriptionInfoListMethod.invoke(sub, null, null) as List<SubscriptionInfo>)
+            } catch (e: NoSuchMethodException) {
+                val getActiveSubscriptionInfoListMethod =
+                    sub.javaClass.getMethod(
+                        "getActiveSubscriptionInfoList",
+                        String::class.java,
+                    )
+                (getActiveSubscriptionInfoListMethod.invoke(sub, null) as List<SubscriptionInfo>)
             }
         }
 
