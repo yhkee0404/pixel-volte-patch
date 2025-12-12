@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Build.VERSION_CODES
 import android.os.Bundle
 import android.os.IInterface
+import android.os.ServiceManager
 import android.telephony.CarrierConfigManager
 import android.telephony.SubscriptionInfo
 import android.telephony.TelephonyFrameworkInitializer
@@ -46,10 +47,14 @@ open class Moder {
         get() =
             ICarrierConfigLoader.Stub.asInterface(
                 ShizukuBinderWrapper(
-                    TelephonyFrameworkInitializer
-                        .getTelephonyServiceManager()
-                        .carrierConfigServiceRegisterer
-                        .get()!!,
+                    try {
+                        TelephonyFrameworkInitializer
+                            .getTelephonyServiceManager()
+                            .carrierConfigServiceRegisterer
+                            .get()
+                    } catch (e: NoClassDefFoundError) {
+                        ServiceManager.getService(Context.CARRIER_CONFIG_SERVICE)
+                    }!!,
                 ),
             )
 
@@ -57,10 +62,14 @@ open class Moder {
         get() =
             ITelephony.Stub.asInterface(
                 ShizukuBinderWrapper(
-                    TelephonyFrameworkInitializer
-                        .getTelephonyServiceManager()
-                        .telephonyServiceRegisterer
-                        .get()!!,
+                    try {
+                        TelephonyFrameworkInitializer
+                            .getTelephonyServiceManager()
+                            .telephonyServiceRegisterer
+                            .get()
+                    } catch (e: NoClassDefFoundError) {
+                        ServiceManager.getService(Context.TELEPHONY_SERVICE)
+                    }!!,
                 ),
             )
 
@@ -68,10 +77,14 @@ open class Moder {
         get() =
             IPhoneSubInfo.Stub.asInterface(
                 ShizukuBinderWrapper(
-                    TelephonyFrameworkInitializer
-                        .getTelephonyServiceManager()
-                        .phoneSubServiceRegisterer
-                        .get()!!,
+                    try {
+                        TelephonyFrameworkInitializer
+                            .getTelephonyServiceManager()
+                            .phoneSubServiceRegisterer
+                            .get()
+                    } catch (e: NoClassDefFoundError) {
+                        ServiceManager.getService("iphonesubinfo")
+                    }!!,
                 ),
             )
 
@@ -79,10 +92,14 @@ open class Moder {
         get() =
             ISub.Stub.asInterface(
                 ShizukuBinderWrapper(
-                    TelephonyFrameworkInitializer
-                        .getTelephonyServiceManager()
-                        .subscriptionServiceRegisterer
-                        .get()!!,
+                    try {
+                        TelephonyFrameworkInitializer
+                            .getTelephonyServiceManager()
+                            .subscriptionServiceRegisterer
+                            .get()
+                    } catch (e: NoClassDefFoundError) {
+                        ServiceManager.getService("isub")
+                    }!!,
                 ),
             )
 }
