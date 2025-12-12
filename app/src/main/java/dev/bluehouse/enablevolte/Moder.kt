@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Build.VERSION_CODES
 import android.os.Bundle
 import android.os.IInterface
+import android.os.PersistableBundle
 import android.os.ServiceManager
 import android.telephony.CarrierConfigManager
 import android.telephony.SubscriptionInfo
@@ -309,7 +310,7 @@ class SubscriptionModer(
         }
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
 
-        val config = iCclInstance.getConfigForSubIdWithFeature(subscriptionId, iCclInstance.defaultCarrierServicePackageName, "")
+        val config = this.getConfigForSubId(iCclInstance, subscriptionId)
         return config.getString(key)
     }
 
@@ -321,7 +322,7 @@ class SubscriptionModer(
         }
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
 
-        val config = iCclInstance.getConfigForSubIdWithFeature(subscriptionId, iCclInstance.defaultCarrierServicePackageName, "")
+        val config = this.getConfigForSubId(iCclInstance, subscriptionId)
         return config.getBoolean(key)
     }
 
@@ -333,7 +334,7 @@ class SubscriptionModer(
         }
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
 
-        val config = iCclInstance.getConfigForSubIdWithFeature(subscriptionId, iCclInstance.defaultCarrierServicePackageName, "")
+        val config = this.getConfigForSubId(iCclInstance, subscriptionId)
         return config.getInt(key)
     }
 
@@ -345,7 +346,7 @@ class SubscriptionModer(
         }
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
 
-        val config = iCclInstance.getConfigForSubIdWithFeature(subscriptionId, iCclInstance.defaultCarrierServicePackageName, "")
+        val config = this.getConfigForSubId(iCclInstance, subscriptionId)
         return config.getLong(key)
     }
 
@@ -357,7 +358,7 @@ class SubscriptionModer(
         }
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
 
-        val config = iCclInstance.getConfigForSubIdWithFeature(subscriptionId, iCclInstance.defaultCarrierServicePackageName, "")
+        val config = this.getConfigForSubId(iCclInstance, subscriptionId)
         return config.getBooleanArray(key) ?: BooleanArray(0)
     }
 
@@ -369,7 +370,7 @@ class SubscriptionModer(
         }
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
 
-        val config = iCclInstance.getConfigForSubIdWithFeature(subscriptionId, iCclInstance.defaultCarrierServicePackageName, "")
+        val config = this.getConfigForSubId(iCclInstance, subscriptionId)
         return config.getIntArray(key) ?: IntArray(0)
     }
 
@@ -381,7 +382,7 @@ class SubscriptionModer(
         }
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
 
-        val config = iCclInstance.getConfigForSubIdWithFeature(subscriptionId, iCclInstance.defaultCarrierServicePackageName, "")
+        val config = this.getConfigForSubId(iCclInstance, subscriptionId)
         return config.getStringArray(key) ?: emptyArray()
     }
 
@@ -393,8 +394,24 @@ class SubscriptionModer(
         }
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
 
-        val config = iCclInstance.getConfigForSubIdWithFeature(subscriptionId, iCclInstance.defaultCarrierServicePackageName, "")
+        val config = this.getConfigForSubId(iCclInstance, subscriptionId)
         return config.get(key)
+    }
+
+    fun getConfigForSubId(iCclInstance: ICarrierConfigLoader, subscriptionId: Int): PersistableBundle {
+        try {
+            return iCclInstance.getConfigForSubIdWithFeature(subscriptionId, iCclInstance.defaultCarrierServicePackageName, "")
+        } catch (e: NoSuchMethodError) {}
+        return try {
+            iCclInstance.getConfigForSubId(subscriptionId, iCclInstance.defaultCarrierServicePackageName)
+        } catch (e: NoSuchMethodError) {
+            val getConfigForSubIdMethod =
+                iCclInstance.javaClass.getMethod(
+                    "getConfigForSubId",
+                    Int::class.javaPrimitiveType,
+                )
+            (getConfigForSubIdMethod.invoke(iCclInstance, subscriptionId) as PersistableBundle)
+        }
     }
 
     val simSlotIndex: Int
