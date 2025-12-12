@@ -109,7 +109,17 @@ class CarrierModer(
 ) : Moder() {
     fun getActiveSubscriptionInfoForSimSlotIndex(index: Int): SubscriptionInfo? {
         val sub = this.loadCachedInterface { sub }
-        return sub.getActiveSubscriptionInfoForSimSlotIndex(index, null, null)
+        return try {
+            sub.getActiveSubscriptionInfoForSimSlotIndex(index, null, null)
+        } catch (e: NoSuchMethodError) {
+            val getActiveSubscriptionInfoForSimSlotIndexMethod =
+                sub.javaClass.getMethod(
+                    "getActiveSubscriptionInfoForSimSlotIndex",
+                    Int::class.javaPrimitiveType,
+                    String::class.java,
+                )
+            (getActiveSubscriptionInfoForSimSlotIndexMethod.invoke(sub, index, null) as? SubscriptionInfo)
+        }
     }
 
     val subscriptions: List<SubscriptionInfo>
