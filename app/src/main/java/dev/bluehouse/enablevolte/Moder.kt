@@ -20,9 +20,8 @@ import com.android.internal.telephony.ISub
 import com.android.internal.telephony.ITelephony
 import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Locale
+import java.time.LocalDate
+import java.time.format.DateTimeParseException
 
 object InterfaceCache {
     val cache = HashMap<String, IInterface>()
@@ -196,19 +195,19 @@ class SubscriptionModer(
     }
 
     private fun overrideConfig(bundle: Bundle?) {
-        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-        val cal = Calendar.getInstance()
-        val securityPatchDate = sdf.parse(Build.VERSION.SECURITY_PATCH)
-        if (securityPatchDate == null) {
-            this.overrideConfigDirectly(bundle)
-        } else {
-            cal.time = securityPatchDate
-            if (cal.get(Calendar.YEAR) > 2025 || (cal.get(Calendar.YEAR) == 2025 && cal.get(Calendar.MONTH) >= 9)) {
-                this.overrideConfigUsingBroker(bundle)
-            } else {
-                this.overrideConfigDirectly(bundle)
-            }
+        val securityPatchDate = try {
+            LocalDate.parse(Build.VERSION.SECURITY_PATCH)
+        } catch (e: DateTimeParseException) {
+            null
         }
+        if (securityPatchDate == null || securityPatchDate.isBefore(LocalDate.of(2025, 10, 1))) {
+            try {
+                return this.overrideConfigDirectly(bundle)
+            } catch (e: SecurityException) {
+            } catch (e: NoSuchMethodError) {
+            } catch (e: NoSuchMethodException) {}
+        }
+        this.overrideConfigUsingBroker(bundle)
     }
 
     private fun publishBundle(fn: (Bundle) -> Unit) {
