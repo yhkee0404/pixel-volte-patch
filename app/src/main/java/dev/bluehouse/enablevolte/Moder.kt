@@ -195,17 +195,19 @@ class SubscriptionModer(
     }
 
     private fun overrideConfig(bundle: Bundle?) {
-        val securityPatchDate = try {
-            LocalDate.parse(Build.VERSION.SECURITY_PATCH)
-        } catch (e: DateTimeParseException) {
-            null
-        }
+        val securityPatchDate =
+            try {
+                LocalDate.parse(Build.VERSION.SECURITY_PATCH)
+            } catch (e: DateTimeParseException) {
+                null
+            }
         if (securityPatchDate == null || securityPatchDate.isBefore(LocalDate.of(2025, 10, 1))) {
             try {
                 return this.overrideConfigDirectly(bundle)
             } catch (e: SecurityException) {
             } catch (e: NoSuchMethodError) {
-            } catch (e: NoSuchMethodException) {}
+            } catch (e: NoSuchMethodException) {
+            }
         }
         this.overrideConfigUsingBroker(bundle)
     }

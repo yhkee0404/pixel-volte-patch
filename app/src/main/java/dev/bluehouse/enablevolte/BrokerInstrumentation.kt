@@ -28,12 +28,14 @@ class BrokerInstrumentation : Instrumentation() {
             try {
                 return configurationManager.overrideConfig(subId, overrideValues, true)
             } catch (e: SecurityException) {
-            } catch (e: NoSuchMethodError) {}
+            } catch (e: NoSuchMethodError) {
+            }
 
             try {
                 return configurationManager.overrideConfig(subId, overrideValues, false)
             } catch (e: SecurityException) {
-            } catch (e: NoSuchMethodError) {}
+            } catch (e: NoSuchMethodError) {
+            }
 
             configurationManager.overrideConfig(subId, overrideValues)
         } finally {
