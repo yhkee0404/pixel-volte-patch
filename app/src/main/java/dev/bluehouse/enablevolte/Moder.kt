@@ -136,12 +136,35 @@ class SubscriptionModer(
 
     private fun overrideConfigDirectly(bundle: Bundle?) {
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
-        if (bundle != null) {
-            val args = toPersistableBundle(bundle)
-            iCclInstance.overrideConfig(subscriptionId, args, true)
-        } else {
-            iCclInstance.overrideConfig(subscriptionId, null, true)
+        val args = bundle?.let(::toPersistableBundle)
+        var securityException: SecurityException? = null
+        var noSuchMethodError: NoSuchMethodError? = null
+
+        try {
+            return iCclInstance.overrideConfig(subscriptionId, args, true)
+        } catch (e: SecurityException) {
+            securityException = e
+        } catch (e: NoSuchMethodError) {
+            noSuchMethodError = e
         }
+
+        try {
+            iCclInstance.overrideConfig(subscriptionId, args, false)
+            throw securityException ?: noSuchMethodError!!
+        } catch (e: SecurityException) {
+            securityException = securityException ?: e
+        } catch (e: NoSuchMethodError) {
+            noSuchMethodError = noSuchMethodError ?: e
+        }
+
+        val overrideConfigMethod =
+            iCclInstance.javaClass.getMethod(
+                "overrideConfig",
+                Int::class.javaPrimitiveType,
+                PersistableBundle::class.java,
+            )
+        overrideConfigMethod.invoke(iCclInstance, subscriptionId, args)
+        throw securityException ?: noSuchMethodError!!
     }
 
     private fun overrideConfigUsingBroker(bundle: Bundle?) {
