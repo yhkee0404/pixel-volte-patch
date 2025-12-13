@@ -287,7 +287,13 @@ class SubscriptionModer(
     fun restartIMSRegistration() {
         val telephony = this.loadCachedInterface { telephony }
         val sub = this.loadCachedInterface { sub }
-        telephony.resetIms(sub.getSlotIndex(this.subscriptionId))
+        try {
+            telephony.resetIms(sub.getSlotIndex(this.subscriptionId))
+        } catch (e: NoSuchMethodError) {
+            telephony.disableIms(sub.getSlotIndex(this.subscriptionId))
+            telephony.enableIms(sub.getSlotIndex(this.subscriptionId))
+            throw e
+        }
     }
 
     fun getStringValue(key: String): String? {
