@@ -128,7 +128,8 @@ class CarrierModer(
             val sub = this.loadCachedInterface { sub }
             try {
                 return sub.getActiveSubscriptionInfoList(null, null, true) ?: emptyList()
-            } catch (e: NoSuchMethodError) {}
+            } catch (e: NoSuchMethodError) {
+            }
             return try {
                 val getActiveSubscriptionInfoListMethod =
                     sub.javaClass.getMethod(
@@ -398,10 +399,14 @@ class SubscriptionModer(
         return config.get(key)
     }
 
-    fun getConfigForSubId(iCclInstance: ICarrierConfigLoader, subscriptionId: Int): PersistableBundle {
+    fun getConfigForSubId(
+        iCclInstance: ICarrierConfigLoader,
+        subscriptionId: Int,
+    ): PersistableBundle {
         try {
             return iCclInstance.getConfigForSubIdWithFeature(subscriptionId, iCclInstance.defaultCarrierServicePackageName, "")
-        } catch (e: NoSuchMethodError) {}
+        } catch (e: NoSuchMethodError) {
+        }
         return try {
             iCclInstance.getConfigForSubId(subscriptionId, iCclInstance.defaultCarrierServicePackageName)
         } catch (e: NoSuchMethodError) {
