@@ -56,10 +56,7 @@ fun Home(navController: NavController) {
         shizukuGranted = true
         subscriptions = carrierModer.subscriptions
         deviceIMSEnabled = carrierModer.deviceSupportsIMS
-
-        if (subscriptions.isNotEmpty() && deviceIMSEnabled) {
-            isIMSRegistered = subscriptions.map { SubscriptionModer(context, it.subscriptionId).isIMSRegistered }
-        }
+        isIMSRegistered = subscriptions.map { SubscriptionModer(context, it.subscriptionId).isIMSRegistered }
     }
 
     LaunchedEffect(Unit) {
@@ -116,14 +113,10 @@ fun Home(navController: NavController) {
         BooleanPropertyView(label = stringResource(R.string.volte_supported_by_device), toggled = deviceIMSEnabled)
 
         for (idx in subscriptions.indices) {
-            var isRegistered = false
-            if (isIMSRegistered.isNotEmpty()) {
-                isRegistered = isIMSRegistered[idx]
-            }
             HeaderText(text = stringResource(R.string.ims_status_for, subscriptions[idx].uniqueName))
             BooleanPropertyView(
                 label = stringResource(R.string.ims_status),
-                toggled = isRegistered,
+                toggled = isIMSRegistered[idx],
                 trueLabel = stringResource(R.string.registered),
                 falseLabel = stringResource(R.string.unregistered),
             )
