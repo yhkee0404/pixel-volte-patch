@@ -80,4 +80,5 @@
     <string name="add_toggle_tile">添加 VoLTE 开关图块</string>
     <string name="sim_config">SIM 配置</string>
     <string name="config_dump_viewer">配置转储查看器</string>
+    <string name="override_config_persistent">重启后保留修改 (崩溃时请关闭)</string>
 </resources>

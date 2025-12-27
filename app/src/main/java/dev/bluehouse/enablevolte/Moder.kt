@@ -9,11 +9,15 @@ import android.os.Build
 import android.os.Build.VERSION_CODES
 import android.os.Bundle
 import android.os.IInterface
+import android.os.PersistableBundle
 import android.telephony.CarrierConfigManager
 import android.telephony.SubscriptionInfo
 import android.telephony.TelephonyFrameworkInitializer
 import android.util.Log
 import androidx.annotation.RequiresApi
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.android.internal.telephony.ICarrierConfigLoader
 import com.android.internal.telephony.IPhoneSubInfo
 import com.android.internal.telephony.ISub
@@ -26,6 +30,8 @@ import java.time.format.DateTimeParseException
 object InterfaceCache {
     val cache = HashMap<String, IInterface>()
 }
+
+var overrideConfigPersistent by mutableStateOf(true)
 
 open class Moder {
     @Suppress("ktlint:standard:property-naming")
@@ -140,20 +146,11 @@ class SubscriptionModer(
         var noSuchMethodError: NoSuchMethodError? = null
 
         try {
-            return iCclInstance.overrideConfig(subscriptionId, args, true)
+            return iCclInstance.overrideConfig(subscriptionId, args, overrideConfigPersistent)
         } catch (e: SecurityException) {
             securityException = e
         } catch (e: NoSuchMethodError) {
             noSuchMethodError = e
-        }
-
-        try {
-            iCclInstance.overrideConfig(subscriptionId, args, false)
-            throw securityException ?: noSuchMethodError!!
-        } catch (e: SecurityException) {
-            securityException = securityException ?: e
-        } catch (e: NoSuchMethodError) {
-            noSuchMethodError = noSuchMethodError ?: e
         }
 
         val overrideConfigMethod =
