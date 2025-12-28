@@ -142,25 +142,21 @@ class SubscriptionModer(
     private fun overrideConfigDirectly(bundle: Bundle?) {
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
         val args = bundle?.let(::toPersistableBundle)
-        var securityException: SecurityException? = null
-        var noSuchMethodError: NoSuchMethodError? = null
 
         try {
-            return iCclInstance.overrideConfig(subscriptionId, args, overrideConfigPersistent)
-        } catch (e: SecurityException) {
-            securityException = e
+            iCclInstance.overrideConfig(subscriptionId, args, overrideConfigPersistent)
         } catch (e: NoSuchMethodError) {
-            noSuchMethodError = e
+            val overrideConfigMethod =
+                iCclInstance.javaClass.getMethod(
+                    "overrideConfig",
+                    Int::class.javaPrimitiveType,
+                    PersistableBundle::class.java,
+                )
+            overrideConfigMethod.invoke(iCclInstance, subscriptionId, args)
+            if (overrideConfigPersistent) {
+                throw e
+            }
         }
-
-        val overrideConfigMethod =
-            iCclInstance.javaClass.getMethod(
-                "overrideConfig",
-                Int::class.javaPrimitiveType,
-                PersistableBundle::class.java,
-            )
-        overrideConfigMethod.invoke(iCclInstance, subscriptionId, args)
-        throw securityException ?: noSuchMethodError!!
     }
 
     private fun overrideConfigUsingBroker(bundle: Bundle?) {
@@ -291,7 +287,6 @@ class SubscriptionModer(
         } catch (e: NoSuchMethodError) {
             telephony.disableIms(sub.getSlotIndex(this.subscriptionId))
             telephony.enableIms(sub.getSlotIndex(this.subscriptionId))
-            throw e
         }
     }
 
