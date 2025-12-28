@@ -312,7 +312,7 @@ class SubscriptionModer(
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
 
         val config = this.getConfigForSubId(iCclInstance, subscriptionId)
-        return config.getString(key)
+        return config?.getString(key)
     }
 
     fun getBooleanValue(key: String): Boolean {
@@ -324,7 +324,7 @@ class SubscriptionModer(
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
 
         val config = this.getConfigForSubId(iCclInstance, subscriptionId)
-        return config.getBoolean(key)
+        return config?.getBoolean(key) ?: false
     }
 
     fun getIntValue(key: String): Int {
@@ -336,7 +336,7 @@ class SubscriptionModer(
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
 
         val config = this.getConfigForSubId(iCclInstance, subscriptionId)
-        return config.getInt(key)
+        return config?.getInt(key) ?: -1
     }
 
     fun getLongValue(key: String): Long {
@@ -348,7 +348,7 @@ class SubscriptionModer(
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
 
         val config = this.getConfigForSubId(iCclInstance, subscriptionId)
-        return config.getLong(key)
+        return config?.getLong(key) ?: -1L
     }
 
     fun getBooleanArrayValue(key: String): BooleanArray {
@@ -360,7 +360,7 @@ class SubscriptionModer(
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
 
         val config = this.getConfigForSubId(iCclInstance, subscriptionId)
-        return config.getBooleanArray(key) ?: BooleanArray(0)
+        return config?.getBooleanArray(key) ?: BooleanArray(0)
     }
 
     fun getIntArrayValue(key: String): IntArray {
@@ -372,7 +372,7 @@ class SubscriptionModer(
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
 
         val config = this.getConfigForSubId(iCclInstance, subscriptionId)
-        return config.getIntArray(key) ?: IntArray(0)
+        return config?.getIntArray(key) ?: IntArray(0)
     }
 
     fun getStringArrayValue(key: String): Array<String> {
@@ -384,7 +384,7 @@ class SubscriptionModer(
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
 
         val config = this.getConfigForSubId(iCclInstance, subscriptionId)
-        return config.getStringArray(key) ?: emptyArray()
+        return config?.getStringArray(key) ?: emptyArray()
     }
 
     fun getValue(key: String): Any? {
@@ -396,13 +396,13 @@ class SubscriptionModer(
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
 
         val config = this.getConfigForSubId(iCclInstance, subscriptionId)
-        return config.get(key)
+        return config?.get(key)
     }
 
     fun getConfigForSubId(
         iCclInstance: ICarrierConfigLoader,
         subscriptionId: Int,
-    ): PersistableBundle {
+    ): PersistableBundle? {
         try {
             return iCclInstance.getConfigForSubIdWithFeature(subscriptionId, iCclInstance.defaultCarrierServicePackageName, "")
         } catch (e: NoSuchMethodError) {
@@ -415,7 +415,7 @@ class SubscriptionModer(
                     "getConfigForSubId",
                     Int::class.javaPrimitiveType,
                 )
-            (getConfigForSubIdMethod.invoke(iCclInstance, subscriptionId) as PersistableBundle)
+            (getConfigForSubIdMethod.invoke(iCclInstance, subscriptionId) as? PersistableBundle)
         }
     }
 
