@@ -16,19 +16,23 @@ import android.telephony.SubscriptionInfo
 import android.telephony.TelephonyFrameworkInitializer
 import android.util.Log
 import androidx.annotation.RequiresApi
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.android.internal.telephony.ICarrierConfigLoader
 import com.android.internal.telephony.IPhoneSubInfo
 import com.android.internal.telephony.ISub
 import com.android.internal.telephony.ITelephony
 import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Locale
+import java.time.LocalDate
+import java.time.format.DateTimeParseException
 
 object InterfaceCache {
     val cache = HashMap<String, IInterface>()
 }
+
+var overrideConfigPersistent by mutableStateOf(true)
 
 open class Moder {
     @Suppress("ktlint:standard:property-naming")
@@ -171,11 +175,21 @@ class SubscriptionModer(
 
     private fun overrideConfigDirectly(bundle: Bundle?) {
         val iCclInstance = this.loadCachedInterface { carrierConfigLoader }
-        if (bundle != null) {
-            val args = toPersistableBundle(bundle)
-            iCclInstance.overrideConfig(subscriptionId, args, true)
-        } else {
-            iCclInstance.overrideConfig(subscriptionId, null, true)
+        val args = bundle?.let(::toPersistableBundle)
+
+        try {
+            iCclInstance.overrideConfig(subscriptionId, args, overrideConfigPersistent)
+        } catch (e: NoSuchMethodError) {
+            val overrideConfigMethod =
+                iCclInstance.javaClass.getMethod(
+                    "overrideConfig",
+                    Int::class.javaPrimitiveType,
+                    PersistableBundle::class.java,
+                )
+            overrideConfigMethod.invoke(iCclInstance, subscriptionId, args)
+            if (overrideConfigPersistent) {
+                throw e
+            }
         }
     }
 
@@ -208,19 +222,21 @@ class SubscriptionModer(
     }
 
     private fun overrideConfig(bundle: Bundle?) {
-        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-        val cal = Calendar.getInstance()
-        val securityPatchDate = sdf.parse(Build.VERSION.SECURITY_PATCH)
-        if (securityPatchDate == null) {
-            this.overrideConfigDirectly(bundle)
-        } else {
-            cal.time = securityPatchDate
-            if (cal.get(Calendar.YEAR) > 2025 || (cal.get(Calendar.YEAR) == 2025 && cal.get(Calendar.MONTH) >= 9)) {
-                this.overrideConfigUsingBroker(bundle)
-            } else {
-                this.overrideConfigDirectly(bundle)
+        val securityPatchDate =
+            try {
+                LocalDate.parse(Build.VERSION.SECURITY_PATCH)
+            } catch (e: DateTimeParseException) {
+                null
+            }
+        if (securityPatchDate == null || securityPatchDate.isBefore(LocalDate.of(2025, 10, 1))) {
+            try {
+                return this.overrideConfigDirectly(bundle)
+            } catch (e: SecurityException) {
+            } catch (e: NoSuchMethodError) {
+            } catch (e: NoSuchMethodException) {
             }
         }
+        this.overrideConfigUsingBroker(bundle)
     }
 
     private fun publishBundle(fn: (Bundle) -> Unit) {
@@ -300,7 +316,12 @@ class SubscriptionModer(
     fun restartIMSRegistration() {
         val telephony = this.loadCachedInterface { telephony }
         val sub = this.loadCachedInterface { sub }
-        telephony.resetIms(sub.getSlotIndex(this.subscriptionId))
+        try {
+            telephony.resetIms(sub.getSlotIndex(this.subscriptionId))
+        } catch (e: NoSuchMethodError) {
+            telephony.disableIms(sub.getSlotIndex(this.subscriptionId))
+            telephony.enableIms(sub.getSlotIndex(this.subscriptionId))
+        }
     }
 
     fun getStringValue(key: String): String? {

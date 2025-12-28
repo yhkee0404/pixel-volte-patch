@@ -79,4 +79,5 @@
     <string name="add_toggle_tile">Add VoLTE config toggle tile</string>
     <string name="sim_config">SIM Config</string>
     <string name="config_dump_viewer">Config Dump Viewer</string>
+    <string name="override_config_persistent">Persist Changes across Reboot (Turn Off on Crash)</string>
 </resources>
