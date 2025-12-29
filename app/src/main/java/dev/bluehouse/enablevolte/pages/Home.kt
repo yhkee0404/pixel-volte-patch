@@ -118,6 +118,13 @@ fun Home(navController: NavController) {
             BooleanPropertyView(label = stringResource(R.string.sim_detected), toggled = subscriptions.isNotEmpty())
             BooleanPropertyView(label = stringResource(R.string.volte_supported_by_device), toggled = deviceIMSEnabled)
 
+            ClickablePropertyView(
+                label = stringResource(R.string.set_ims_registration),
+                value = "",
+            ) {
+                carrierModer.setImsRegistrationState(true)
+            }
+
             for (idx in subscriptions.indices) {
                 HeaderText(text = stringResource(R.string.ims_status_for, subscriptions[idx].uniqueName))
                 BooleanPropertyView(

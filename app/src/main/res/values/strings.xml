@@ -62,6 +62,7 @@
     <string name="true_">Yes</string>
     <string name="false_">No</string>
     <string name="restart_ims_registration">Restart IMS registration</string>
+    <string name="set_ims_registration">Register IMS</string>
     <string name="please_wait">Working on it…</string>
     <string name="expert_mode">Expert Mode</string>
     <string name="loading">Loading…</string>

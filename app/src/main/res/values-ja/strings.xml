@@ -63,6 +63,7 @@
   <string name="true_">はい</string>
   <string name="false_">いいえ</string>
   <string name="restart_ims_registration">IMS の登録を再開する</string>
+  <string name="set_ims_registration">IMS を登録する</string>
   <string name="please_wait">実行中です…</string>
   <string name="expert_mode">エキスパートモード</string>
   <string name="loading">読み込み中…</string>

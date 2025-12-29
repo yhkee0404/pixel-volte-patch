@@ -63,6 +63,7 @@
     <string name="true_">是</string>
     <string name="false_">否</string>
     <string name="restart_ims_registration">重新注册IMS</string>
+    <string name="set_ims_registration">注册 IMS</string>
     <string name="please_wait">请稍后…</string>
     <string name="expert_mode">专家模式</string>
     <string name="loading">加载中…</string>

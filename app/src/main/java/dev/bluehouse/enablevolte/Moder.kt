@@ -164,6 +164,11 @@ class CarrierModer(
             val volteConfigId = res.getIdentifier("config_device_volte_available", "bool", "android")
             return res.getBoolean(volteConfigId)
         }
+
+    fun setImsRegistrationState(registered: Boolean) {
+        val telephony = this.loadCachedInterface { telephony }
+        telephony.setImsRegistrationState(registered)
+    }
 }
 
 class SubscriptionModer(
