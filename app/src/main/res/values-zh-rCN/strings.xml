@@ -12,6 +12,16 @@
     <string name="running_latest_version">正在运行最新版本</string>
     <string name="shizuku_service_running">Shizuku 服务正在运行</string>
     <string name="shizuku_permission_granted">Shizuku 已授权</string>
+    <string name="persist_config">重启后保留设置 (若遇到崩溃请关闭)</string>
+    <string name="persist_volte_config">保留 VoLTE 设置 (需要重启以进行验证)</string>
+    <string name="volte_requirements">VoLTE 需求</string>
+    <string name="volte_supported_by_system">系统支持的 VoLTE</string>
+    <string name="volte_supported_by_user">用户支持的 VoLTE</string>
+    <string name="volte_supported_by_device">设备支持的 VoLTE</string>
+    <string name="volte_supported_by_carrier">运营商支持的 VoLTE</string>
+    <string name="volte_gba_satisfied">VoLTE GBA 已满足</string>
+    <string name="volte_tty_satisfied">VoLTE TTY 已满足</string>
+    <string name="volte_provisioning_satisfied">VoLTE 预配已满足</string>
     <string name="enable_volte">启用 VoLTE</string>
     <string name="enable_vonr">启用 VoNR</string>
     <string name="enable_crosssim">启用备用通话</string>
@@ -27,7 +37,6 @@
     <string name="enable_ss_over_ut">UT接口下启用补充业务</string>
     <string name="enable_ss_over_cdma">CDMA下启用补充业务</string>
     <string name="sim_detected">检测到 SIM</string>
-    <string name="volte_supported_by_device">支持 VoLTE</string>
     <string name="ims_status">IMS 状态</string>
     <string name="ims_status_for">卡 %1$s 的 IMS 状态</string>
     <string name="permissions_capabilities"><![CDATA[权限与兼容性]]></string>
@@ -42,7 +51,7 @@
     <string name="show_vowifi_icon">显示 VoWiFI 图标</string>
     <string name="always_show_data_icon">始终显示数据速率图标</string>
     <string name="hide_enhanced_data_icon">隐藏增强4G(LTE+)图标</string>
-    <string name="enable_enhanced_4g_lte_plus">启用增强4G(LTE+)</string>
+    <string name="enhanced_4g_lte_plus_enabled">增强型 4G LTE (LTE+) 已启用</string>
     <string name="string_values">字符串值</string>
     <string name="miscellaneous">其他</string>
     <string name="reset_all_settings">重置所有设置</string>

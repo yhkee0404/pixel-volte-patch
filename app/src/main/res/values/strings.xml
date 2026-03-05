@@ -11,6 +11,16 @@
     <string name="running_latest_version">Running latest version</string>
     <string name="shizuku_service_running">Shizuku Service Running</string>
     <string name="shizuku_permission_granted">Shizuku Permission Granted</string>
+    <string name="persist_config">Persist settings across reboots (Turn off on crashes)</string>
+    <string name="persist_volte_config">Persist VoLTE settings (Reboot required to verify)</string>
+    <string name="volte_requirements">VoLTE Requirements</string>
+    <string name="volte_supported_by_system">VoLTE Supported by System</string>
+    <string name="volte_supported_by_user">VoLTE Supported by User</string>
+    <string name="volte_supported_by_device">VoLTE Supported by Device</string>
+    <string name="volte_supported_by_carrier">VoLTE Supported by Carrier</string>
+    <string name="volte_gba_satisfied">VoLTE GBA Satisfied</string>
+    <string name="volte_tty_satisfied">VoLTE TTY Satisfied</string>
+    <string name="volte_provisioning_satisfied">VoLTE Provisioning Satisfied</string>
     <string name="enable_volte">Enable VoLTE</string>
     <string name="enable_vonr">Enable VoNR</string>
     <string name="enable_crosssim">Enable Backup Calling</string>
@@ -26,7 +36,6 @@
     <string name="enable_ss_over_ut">Enable Supplementary Services over UT</string>
     <string name="enable_ss_over_cdma">Enable Supplementary Services over CDMA</string>
     <string name="sim_detected">SIM Detected</string>
-    <string name="volte_supported_by_device">VoLTE Supported by Device</string>
     <string name="ims_status">IMS Status</string>
     <string name="ims_status_for">IMS Status for %1$s</string>
     <string name="permissions_capabilities"><![CDATA[Permissions & Capabilities]]></string>
@@ -41,7 +50,7 @@
     <string name="show_vowifi_icon">Show VoWiFI Icon</string>
     <string name="always_show_data_icon">Always Show Data RAT Icon</string>
     <string name="hide_enhanced_data_icon">Hide Enhanced Data Icon</string>
-    <string name="enable_enhanced_4g_lte_plus">Enable Enhanced 4G LTE (LTE+)</string>
+    <string name="enhanced_4g_lte_plus_enabled">Enhanced 4G LTE (LTE+) Enabled</string>
     <string name="string_values">String Values</string>
     <string name="miscellaneous">Miscellaneous</string>
     <string name="reset_all_settings">Reset all settings</string>

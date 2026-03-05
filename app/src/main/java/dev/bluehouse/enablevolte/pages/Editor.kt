@@ -1,6 +1,7 @@
 package dev.bluehouse.enablevolte.pages
 
 import android.telephony.CarrierConfigManager
+import android.telephony.SubscriptionInfo
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -323,7 +324,10 @@ fun fieldToDataRow(
 @Suppress("ktlint:standard:function-naming")
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun Editor(subId: Int) {
+fun Editor(
+    subscriptions: List<SubscriptionInfo>,
+    subId: Int,
+) {
     val context = LocalContext.current
     var sections by remember { mutableStateOf(listOf<Section>()) }
     var loading by rememberSaveable { mutableStateOf(true) }

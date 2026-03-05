@@ -5,6 +5,7 @@ import android.os.BaseBundle
 import android.os.Bundle
 import android.os.PersistableBundle
 import android.telephony.SubscriptionInfo
+import android.util.Log
 import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.runtime.Composable
 import androidx.navigation.NamedNavArgument
@@ -16,7 +17,12 @@ import androidx.navigation.get
 import com.github.kittinunf.fuel.httpGet
 import com.github.kittinunf.fuel.json.responseJson
 import com.github.kittinunf.result.Result
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
+import java.lang.reflect.InvocationTargetException
 
 enum class ShizukuStatus {
     GRANTED,
@@ -48,6 +54,7 @@ fun getLatestAppVersion(handler: (String) -> Unit) {
         .responseJson { _, _, result ->
             when (result) {
                 is Result.Failure -> {
+                    Log.e("Utils:getLatestAppVersion", "Network request failed: ${result.error.message}", result.error)
                     handler("0.0.0")
                 }
                 is Result.Success -> {
@@ -59,7 +66,8 @@ fun getLatestAppVersion(handler: (String) -> Unit) {
                                 .getJSONObject(0)
                                 .getString("tag_name"),
                         )
-                    } catch (e: java.lang.Exception) {
+                    } catch (e: Exception) {
+                        Log.e("Utils:getLatestAppVersion", "JSON parsing failed", e)
                         handler("0.0.0")
                     }
                 }
@@ -155,5 +163,68 @@ fun putIntoBundle(
         throw IllegalArgumentException(
             ("Objects of type ${value?.javaClass?.simpleName ?: "Unknown"} can not be put into a ${BaseBundle::class.java.simpleName}"),
         )
+    }
+}
+
+class AsyncTryScope {
+    internal var beforeBlock: () -> Unit = {}
+    internal var asyncBlock: suspend () -> Unit = {}
+    internal var okBlock: () -> Unit = {}
+    internal var errorBlock: () -> Unit = {}
+    internal var alwaysBlock: () -> Unit = {}
+
+    fun before(block: () -> Unit) {
+        beforeBlock = block
+    }
+
+    fun async(block: suspend () -> Unit) {
+        asyncBlock = block
+    }
+
+    fun ok(block: () -> Unit) {
+        okBlock = block
+    }
+
+    fun error(block: () -> Unit) {
+        errorBlock = block
+    }
+
+    fun always(block: () -> Unit) {
+        alwaysBlock = block
+    }
+}
+
+fun asyncTry(
+    scope: CoroutineScope,
+    block: AsyncTryScope.() -> Unit,
+) {
+    val scopeBlock = AsyncTryScope().apply(block)
+    scope.launch {
+        var t: Throwable? = null
+        try {
+            scopeBlock.beforeBlock()
+            withContext(Dispatchers.Default) {
+                scopeBlock.asyncBlock()
+            }
+            return@launch scopeBlock.okBlock()
+        } catch (e: IllegalStateException) {
+            t = e
+        } catch (e: IllegalArgumentException) {
+            t = e
+        } catch (e: InvocationTargetException) {
+            t = e.targetException
+        } catch (e: NoSuchMethodError) {
+            t = e
+        } catch (e: NoSuchMethodException) {
+            t = e
+        } catch (e: SecurityException) {
+            t = e
+        } finally {
+            t?.let {
+                Log.e("Utils", "asyncUpdate error", it)
+                scopeBlock.errorBlock()
+            }
+            scopeBlock.alwaysBlock()
+        }
     }
 }

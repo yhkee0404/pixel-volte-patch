@@ -3,9 +3,11 @@ package dev.bluehouse.enablevolte.pages
 import android.app.StatusBarManager
 import android.content.ComponentName
 import android.graphics.drawable.Icon
+import android.os.Build
 import android.os.Build.VERSION
 import android.os.Build.VERSION_CODES
 import android.telephony.CarrierConfigManager
+import android.telephony.SubscriptionInfo
 import android.util.Log
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -13,9 +15,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -24,7 +28,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.navigation.NavController
-import dev.bluehouse.enablevolte.CarrierModer
 import dev.bluehouse.enablevolte.R
 import dev.bluehouse.enablevolte.ShizukuStatus
 import dev.bluehouse.enablevolte.SubscriptionModer
@@ -35,27 +38,49 @@ import dev.bluehouse.enablevolte.components.HeaderText
 import dev.bluehouse.enablevolte.components.InfiniteLoadingDialog
 import dev.bluehouse.enablevolte.components.RadioSelectPropertyView
 import dev.bluehouse.enablevolte.components.UserAgentPropertyView
+import dev.bluehouse.enablevolte.configPersistent
+import dev.bluehouse.enablevolte.asyncUpdate
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.lang.IllegalStateException
 
 @Suppress("ktlint:standard:function-naming")
 @Composable
 fun Config(
+    subscriptions: List<SubscriptionInfo>,
     navController: NavController,
     subId: Int,
 ) {
     val TAG = "HomeActivity:Config"
 
     val moder = SubscriptionModer(LocalContext.current, subId)
-    val carrierModer = CarrierModer(LocalContext.current)
     val carrierName = moder.carrierName
     val scrollState = rememberScrollState()
     val context = LocalContext.current
     val cannotFindKeyText = stringResource(R.string.cannot_find_key)
     var configurable by rememberSaveable { mutableStateOf(false) }
-    var voLTEEnabled by rememberSaveable { mutableStateOf(false) }
+    val volteSupportedBySystem = moder.isVolteSupportedBySystem
+    var volteSupportedByUser by rememberSaveable { mutableStateOf(false) }
+    val volteSupportedByDevice = moder.isVolteSupportedByDevice
+    var volteSupportedByCarrier by rememberSaveable { mutableStateOf(false) }
+    var volteGbaSatisfied by rememberSaveable { mutableStateOf(false) }
+    var volteUiEditable by rememberSaveable { mutableStateOf(false) }
+    var ltePlusEnabledByCarrier by rememberSaveable { mutableStateOf(false) }
+    var volteTtySatisfied by rememberSaveable { mutableStateOf(false) }
+    var volteProvisioningSatisfied by rememberSaveable { mutableStateOf(false) }
+    val volteConfigPersistent by remember {
+        val volteSupportedByCarrier = moder.isVolteSupportedByCarrier
+        val volteGbaSatisfied = moder.isGbaValid
+        val volteUiEditable = moder.isVolteUiEditable
+        val ltePlusEnabledByCarrier = moder.isLtePlusEnabledByCarrier
+        val volteTtySatisfied = moder.isNonTtyOrTtyOnVolteEnabled
+        derivedStateOf {
+            configPersistent ||
+                (volteSupportedBySystem || volteSupportedByUser || volteSupportedByDevice && volteSupportedByCarrier && volteGbaSatisfied) &&
+                (volteSupportedByUser || volteUiEditable || ltePlusEnabledByCarrier) && volteTtySatisfied && volteProvisioningSatisfied
+        }
+    }
+    var volteEnabled by rememberSaveable { mutableStateOf(false) }
     var voNREnabled by rememberSaveable { mutableStateOf(false) }
     var crossSIMEnabled by rememberSaveable { mutableStateOf(false) }
     var voWiFiEnabled by rememberSaveable { mutableStateOf(false) }
@@ -73,8 +98,7 @@ fun Config(
     var ssOverCDMAEnabled by rememberSaveable { mutableStateOf(false) }
     var show4GForLteEnabled by rememberSaveable { mutableStateOf(false) }
     var hideEnhancedDataIconEnabled by rememberSaveable { mutableStateOf(false) }
-    var is4GPlusEnabled by rememberSaveable { mutableStateOf(false) }
-    var configuredUserAgent: String? by rememberSaveable { mutableStateOf("") }
+    var configuredUserAgent by rememberSaveable { mutableStateOf("") }
     var configurableItems by rememberSaveable { mutableStateOf<Map<String, String>>(mapOf()) }
     var reversedConfigurableItems by rememberSaveable { mutableStateOf<Map<String, String>>(mapOf()) }
     var loading by rememberSaveable { mutableStateOf(true) }
@@ -92,7 +116,14 @@ fun Config(
                 }.flatten()
                 .associate { field -> field.name to field.get(field) as String }
         reversedConfigurableItems = configurableItems.entries.associate { (k, v) -> v to k }
-        voLTEEnabled = moder.isVoLteConfigEnabled
+        volteSupportedByUser = moder.isVolteSupportedByUser
+        volteSupportedByCarrier = moder.isVolteSupportedByCarrier
+        volteGbaSatisfied = moder.isGbaValid
+        volteUiEditable = moder.isVolteUiEditable
+        ltePlusEnabledByCarrier = moder.isLtePlusEnabledByCarrier
+        volteTtySatisfied = moder.isNonTtyOrTtyOnVolteEnabled
+        volteProvisioningSatisfied = Build.VERSION.SDK_INT <= VERSION_CODES.Q || moder.isVolteProvisioned
+        volteEnabled = moder.isVolteEnabled
         voNREnabled = VERSION.SDK_INT >= VERSION_CODES.UPSIDE_DOWN_CAKE && moder.isVoNrConfigEnabled
         crossSIMEnabled = moder.isCrossSIMConfigEnabled
         voWiFiEnabled = moder.isVoWifiConfigEnabled
@@ -110,28 +141,23 @@ fun Config(
         ssOverCDMAEnabled = moder.ssOverCDMAEnabled
         show4GForLteEnabled = VERSION.SDK_INT >= VERSION_CODES.R && moder.isShow4GForLteEnabled
         hideEnhancedDataIconEnabled = VERSION.SDK_INT >= VERSION_CODES.R && moder.isHideEnhancedDataIconEnabled
-        is4GPlusEnabled = moder.is4GPlusEnabled
-        configuredUserAgent =
-            try {
-                moder.userAgentConfig
-            } catch (e: java.lang.NullPointerException) {
-                null
-            }
+        configuredUserAgent = moder.userAgentConfig ?: ""
     }
 
     LaunchedEffect(true) {
+        loading = true
         if (checkShizukuPermission(0) == ShizukuStatus.GRANTED) {
-            if (carrierModer.deviceSupportsIMS && subId >= 0) {
+            if (subId >= 0) {
                 configurable =
                     try {
                         withContext(Dispatchers.Default) {
                             loadFlags()
-                            loading = false
                         }
                         true
                     } catch (e: IllegalStateException) {
-                        loading = false
                         false
+                    } finally {
+                        loading = false
                     }
             } else {
                 loading = false
@@ -147,17 +173,53 @@ fun Config(
         InfiniteLoadingDialog()
     } else {
         Column(modifier = Modifier.padding(Dp(16f)).verticalScroll(scrollState)) {
+            BooleanPropertyView(
+                label = stringResource(R.string.persist_config),
+                toggled = configPersistent,
+                enabled = false,
+            ) {
+                configPersistent = !configPersistent
+            }
+            BooleanPropertyView(
+                label = stringResource(R.string.persist_volte_config),
+                toggled = volteConfigPersistent,
+            )
+            BooleanPropertyView(label = stringResource(R.string.volte_supported_by_system), toggled = volteSupportedBySystem)
+            BooleanPropertyView(label = stringResource(R.string.volte_supported_by_user), toggled = volteSupportedByUser)
+            BooleanPropertyView(label = stringResource(R.string.volte_supported_by_device), toggled = volteSupportedByDevice)
+            BooleanPropertyView(label = stringResource(R.string.volte_supported_by_carrier), toggled = volteSupportedByCarrier)
+            BooleanPropertyView(label = stringResource(R.string.volte_gba_satisfied), toggled = volteGbaSatisfied)
+            BooleanPropertyView(label = stringResource(R.string.volte_tty_satisfied), toggled = volteTtySatisfied)
+            BooleanPropertyView(label = stringResource(R.string.volte_provisioned), toggled = volteProvisioned)
+
             HeaderText(text = stringResource(R.string.feature_toggles))
-            BooleanPropertyView(label = stringResource(R.string.enable_volte), toggled = voLTEEnabled) {
-                voLTEEnabled =
-                    if (voLTEEnabled) {
-                        moder.updateCarrierConfig(CarrierConfigManager.KEY_CARRIER_VOLTE_AVAILABLE_BOOL, false)
-                        false
-                    } else {
-                        moder.updateCarrierConfig(CarrierConfigManager.KEY_CARRIER_VOLTE_AVAILABLE_BOOL, true)
+            BooleanPropertyView(
+                label = stringResource(R.string.enable_volte),
+                toggled = volteEnabled,
+                enabled = !volteEnabled || volteSupportedByUser || volteUiEditable || ltePlusEnabledByCarrier,
+            ) {
+                asyncUpdate(scope) {
+                    update {
+                        if (configPersistentVoLTE) {
+                            moder.setVoImsOptInSetting(!voLTEEnabled)
+                        }
+                        moder.updateCarrierConfig(CarrierConfigManager.KEY_CARRIER_VOLTE_AVAILABLE_BOOL, !voLTEEnabled)
+                        moder.updateCarrierConfig(CarrierConfigManager.KEY_CARRIER_IMS_GBA_REQUIRED_BOOL, false)
+                        moder.setVoLteProvisioned(true)
+                        moder.set4GPlus(true)
                         moder.restartIMSRegistration()
-                        true
                     }
+                    ok {
+                        if (!voLTEEnabled) {
+                            voImsOptInEnabled = true
+                            gbaRequired = false
+                            ttyOverVoLTEEnabled = true
+                            voLTEProvisioned = true
+                            is4GPlusEnabled = true
+                        }
+                        voLTEEnabled = !voLTEEnabled
+                    }
+                }
             }
 
             BooleanPropertyView(
@@ -264,43 +326,6 @@ fun Config(
                         moder.restartIMSRegistration()
                         true
                     }
-            }
-            if (VERSION.SDK_INT >= VERSION_CODES.Q) {
-                BooleanPropertyView(
-                    label = stringResource(R.string.enable_enhanced_4g_lte_plus),
-                    toggled = is4GPlusEnabled,
-                ) {
-                    is4GPlusEnabled =
-                        if (is4GPlusEnabled) {
-                            moder.updateCarrierConfig(
-                                CarrierConfigManager.KEY_EDITABLE_ENHANCED_4G_LTE_BOOL,
-                                false,
-                            )
-                            moder.updateCarrierConfig(
-                                CarrierConfigManager.KEY_ENHANCED_4G_LTE_ON_BY_DEFAULT_BOOL,
-                                false,
-                            )
-                            moder.updateCarrierConfig(
-                                CarrierConfigManager.KEY_HIDE_ENHANCED_4G_LTE_BOOL,
-                                true,
-                            )
-                            false
-                        } else {
-                            moder.updateCarrierConfig(
-                                CarrierConfigManager.KEY_EDITABLE_ENHANCED_4G_LTE_BOOL,
-                                true,
-                            )
-                            moder.updateCarrierConfig(
-                                CarrierConfigManager.KEY_ENHANCED_4G_LTE_ON_BY_DEFAULT_BOOL,
-                                true,
-                            )
-                            moder.updateCarrierConfig(
-                                CarrierConfigManager.KEY_HIDE_ENHANCED_4G_LTE_BOOL,
-                                false,
-                            )
-                            true
-                        }
-                }
             }
             BooleanPropertyView(label = stringResource(R.string.allow_adding_apns), toggled = allowAddingAPNs) {
                 allowAddingAPNs =
@@ -534,10 +559,14 @@ fun Config(
                 label = stringResource(R.string.reset_all_settings),
                 value = stringResource(R.string.reverts_to_carrier_default),
             ) {
-                moder.clearCarrierConfig()
-                scope.launch {
-                    withContext(Dispatchers.Default) {
+                loading = true
+                updateRefresh(scope) {
+                    update {
+                        moder.clearCarrierConfig()
                         loadFlags()
+                    }
+                    refresh {
+                        loading = false
                     }
                 }
             }
@@ -557,7 +586,15 @@ fun Config(
                 label = stringResource(R.string.restart_ims_registration),
                 value = "",
             ) {
-                moder.restartIMSRegistration()
+                loading = true
+                updateRefresh(scope) {
+                    update {
+                        moder.restartIMSRegistration()
+                    }
+                    refresh {
+                        loading = false
+                    }
+                }
             }
         }
     }

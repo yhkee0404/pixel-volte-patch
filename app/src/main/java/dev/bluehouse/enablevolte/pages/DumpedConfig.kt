@@ -2,6 +2,7 @@ package dev.bluehouse.enablevolte.pages
 
 import android.content.Context
 import android.telephony.CarrierConfigManager
+import android.telephony.SubscriptionInfo
 import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -35,6 +36,7 @@ import kotlinx.coroutines.withContext
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DumpedConfig(
+    // subscriptions: List<SubscriptionInfo>,
     context: Context,
     subId: Int,
 ) {
