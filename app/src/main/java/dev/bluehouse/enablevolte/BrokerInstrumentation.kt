@@ -26,7 +26,7 @@ class BrokerInstrumentation : Instrumentation() {
             val configurationManager = this.context.getSystemService(CarrierConfigManager::class.java)
 
             try {
-                configurationManager.overrideConfig(subId, overrideValues, overrideConfigPersistent)
+                configurationManager.overrideConfig(subId, overrideValues, configPersistent)
             } catch (e: NoSuchMethodError) {
                 configurationManager.overrideConfig(subId, overrideValues)
             }

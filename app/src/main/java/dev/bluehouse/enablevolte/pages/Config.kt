@@ -35,7 +35,7 @@ import dev.bluehouse.enablevolte.components.HeaderText
 import dev.bluehouse.enablevolte.components.InfiniteLoadingDialog
 import dev.bluehouse.enablevolte.components.RadioSelectPropertyView
 import dev.bluehouse.enablevolte.components.UserAgentPropertyView
-import dev.bluehouse.enablevolte.overrideConfigPersistent
+import dev.bluehouse.enablevolte.configPersistent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -148,8 +148,8 @@ fun Config(
         InfiniteLoadingDialog()
     } else {
         Column(modifier = Modifier.padding(Dp(16f)).verticalScroll(scrollState)) {
-            BooleanPropertyView(label = stringResource(R.string.override_config_persistent), toggled = overrideConfigPersistent) {
-                overrideConfigPersistent = !overrideConfigPersistent
+            BooleanPropertyView(label = stringResource(R.string.persist_config), toggled = configPersistent) {
+                configPersistent = !configPersistent
             }
 
             HeaderText(text = stringResource(R.string.feature_toggles))
