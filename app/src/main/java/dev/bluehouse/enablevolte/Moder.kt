@@ -43,22 +43,31 @@ import rikka.shizuku.SystemServiceHelper
 import java.lang.reflect.InvocationTargetException
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
-import java.util.WeakHashMap
 
 object InterfaceCache {
     @PublishedApi
-    internal object NULL_INTERFACE : IInterface {
+    internal object NullInterface : IInterface {
         override fun asBinder(): IBinder? = null
     }
 
     @PublishedApi
     internal val nameCache = HashMap<String, IInterface>()
 
-    @PublishedApi
-    internal val binderCache = WeakHashMap<IBinder, IInterface>()
+    fun clear() {
+        synchronized(nameCache) {
+            nameCache.clear()
+        }
+    }
 }
 
 var configPersistent by mutableStateOf(false)
+
+enum class SubscriptionAccessStatus {
+    VALID,
+    SHIZUKU_STOPPED,
+    SHIZUKU_NOT_GRANTED,
+    INACTIVE_SUBSCRIPTION,
+}
 
 open class Moder {
     @Suppress("ktlint:standard:property-naming")
@@ -71,17 +80,11 @@ open class Moder {
 
     protected inline fun <reified T : IInterface> loadCachedNullableInterface(crossinline interfaceLoader: () -> T?): T? =
         synchronized(InterfaceCache.nameCache) {
-            val value = InterfaceCache.nameCache.getOrPut(T::class.java.name) {
-                interfaceLoader() ?: InterfaceCache.NULL_INTERFACE
-            }
-            if (value === InterfaceCache.NULL_INTERFACE) null else value as T
-        }
-
-    protected inline fun <reified T : IInterface> IBinder.cache(crossinline asInterface: (IBinder) -> T): T =
-        synchronized(InterfaceCache.binderCache) {
-            InterfaceCache.binderCache.getOrPut(this) {
-                asInterface(ShizukuBinderWrapper(this))
-            } as T
+            val value =
+                InterfaceCache.nameCache.getOrPut(T::class.java.name) {
+                    interfaceLoader() ?: InterfaceCache.NullInterface
+                }
+            if (value === InterfaceCache.NullInterface) null else value as T
         }
 
     protected val carrierConfigLoader: ICarrierConfigLoader
@@ -142,23 +145,44 @@ open class Moder {
 
     protected val telecom: ITelecomService?
         get() =
-            ServiceManager.getService(Context.TELECOM_SERVICE)
+            ServiceManager
+                .getService(Context.TELECOM_SERVICE)
                 ?.let { ITelecomService.Stub.asInterface(ShizukuBinderWrapper(it)) }
 
     protected val connectivity: IConnectivityManager?
         get() =
-            ServiceManager.getService(Context.CONNECTIVITY_SERVICE)
+            ServiceManager
+                .getService(Context.CONNECTIVITY_SERVICE)
                 ?.let { IConnectivityManager.Stub.asInterface(ShizukuBinderWrapper(it)) }
+
+    val isVolteSupportedByDevice: Boolean
+        get() =
+            try {
+                val res = Resources.getSystem()
+                val volteConfigId = res.getIdentifier("config_device_volte_available", "bool", "android")
+                res.getBoolean(volteConfigId)
+            } catch (_: Resources.NotFoundException) {
+                false
+            }
 
     fun setAirplaneMode(enabled: Boolean) {
         val connectivity = this.loadCachedNullableInterface { connectivity } ?: return
         connectivity.setAirplaneMode(enabled)
+    }
+
+    companion object {
+        fun recreateDependencies() {
+            InterfaceCache.clear()
+        }
     }
 }
 
 open class CarrierModer(
     private val context: Context,
 ) : Moder() {
+    @Suppress("ktlint:standard:property-naming")
+    private val TAG = "CarrierModer"
+
     fun getActiveSubscriptionInfoForSimSlotIndex(index: Int): SubscriptionInfo? {
         val sub = this.loadCachedInterface { sub }
         return try {
@@ -205,17 +229,6 @@ open class CarrierModer(
             return sub.defaultSubId
         }
 
-    val isVolteSupportedByDevice: Boolean
-        get() =
-            try {
-                val res = Resources.getSystem()
-                val volteConfigId = res.getIdentifier("config_device_volte_available", "bool", "android")
-                res.getBoolean(volteConfigId)
-            } catch (e: Resources.NotFoundException) {
-                Log.d(TAG, "getImsProvisionedBoolNoException", e)
-                false
-            }
-
     fun setImsRegistrationState(registered: Boolean) {
         val telephony = this.loadCachedInterface { telephony }
         telephony.setImsRegistrationState(registered)
@@ -225,7 +238,7 @@ open class CarrierModer(
 class SubscriptionModer(
     private val context: Context,
     val subscriptionId: Int,
-) : Moder(context) {
+) : Moder() {
     @Suppress("ktlint:standard:property-naming")
     private val TAG = "SubscriptionModer"
 
@@ -340,6 +353,62 @@ class SubscriptionModer(
                 isActiveSubIdMethod.invoke(sub, subscriptionId) as Boolean
             }
         }
+
+    fun validateAccess(): SubscriptionAccessStatus =
+        when (getShizukuStatus()) {
+            ShizukuStatus.STOPPED -> SubscriptionAccessStatus.SHIZUKU_STOPPED
+            ShizukuStatus.NOT_GRANTED -> SubscriptionAccessStatus.SHIZUKU_NOT_GRANTED
+            ShizukuStatus.GRANTED -> {
+                val isActive =
+                    try {
+                        this.isActiveSubId
+                    } catch (e: RuntimeException) {
+                        Log.w(TAG, "Failed to validate active subscription state", e)
+                        false
+                    }
+                if (!isActive) {
+                    Log.w(TAG, "Subscription $subscriptionId is inactive. Invalidating cached IMS config.")
+                    invalidateSubscriptionCache(subscriptionId)
+                    SubscriptionAccessStatus.INACTIVE_SUBSCRIPTION
+                } else {
+                    SubscriptionAccessStatus.VALID
+                }
+            }
+        }
+
+    fun ensureActiveSubscription(): Boolean = validateAccess() == SubscriptionAccessStatus.VALID
+
+    private fun getOrCreateMmTelConfig(binder: IBinder): IImsConfig =
+        synchronized(mmTelConfigCache) {
+            mmTelConfigCache[subscriptionId]
+                ?.takeIf { it.binder == binder }
+                ?.config
+                ?: IImsConfig.Stub.asInterface(ShizukuBinderWrapper(binder)).also { config ->
+                    mmTelConfigCache[subscriptionId] = CachedMmTelConfig(binder, config)
+                }
+        }
+
+    companion object {
+        private data class CachedMmTelConfig(
+            val binder: IBinder,
+            val config: IImsConfig,
+        )
+
+        private val mmTelConfigCache = HashMap<Int, CachedMmTelConfig>()
+
+        fun invalidateSubscriptionCache(subscriptionId: Int) {
+            synchronized(mmTelConfigCache) {
+                mmTelConfigCache.remove(subscriptionId)
+            }
+        }
+
+        fun recreateDependencies() {
+            Moder.recreateDependencies()
+            synchronized(mmTelConfigCache) {
+                mmTelConfigCache.clear()
+            }
+        }
+    }
 
     fun updateCarrierConfig(
         key: String,
@@ -505,13 +574,16 @@ class SubscriptionModer(
 
     protected val mmTelConfig: IImsConfig?
         get() {
-            return try {
-                val telephony = this.loadCachedInterface { telephony }
-                telephony
-                    .getImsConfig(this.simSlotIndex, ImsFeature.FEATURE_MMTEL)
-            } catch (_: RemoteException) {
-                null
-            }?.asBinder()?.cache(IImsConfig.Stub::asInterface)
+            val binder =
+                try {
+                    val telephony = this.loadCachedInterface { telephony }
+                    telephony
+                        .getImsConfig(this.simSlotIndex, ImsFeature.FEATURE_MMTEL)
+                        ?.asBinder()
+                } catch (_: RemoteException) {
+                    null
+                } ?: return null
+            return getOrCreateMmTelConfig(binder)
         }
 
     fun isMmTelProvisioningRequired(
@@ -587,7 +659,7 @@ class SubscriptionModer(
         if (value == ImsConfigImplBase.CONFIG_RESULT_UNKNOWN) {
             try {
                 value = this.mmTelConfig?.getConfigInt(key) ?: ImsConfigImplBase.CONFIG_RESULT_UNKNOWN
-            } catch (_: ImsException) {
+            } catch (e: ImsException) {
                 Log.d(TAG, "getImsProvisionedBoolNoException", e)
             }
         }
@@ -661,7 +733,8 @@ class SubscriptionModer(
             Log.d(TAG, "isGbaValid")
             val phoneSubInfo = this.loadCachedNullableInterface { phoneSubInfo } ?: return false
             val efIst = phoneSubInfo.getIsimIst(this.subscriptionId) ?: return true
-            val result = efIst.length > 1 &&
+            val result =
+                efIst.length > 1 &&
                     (0x02 and efIst[1].code) != 0
             Log.d(TAG, "isGbaValid - GBA capable=" + result + ", ISF=" + efIst)
             return result
@@ -689,10 +762,11 @@ class SubscriptionModer(
             return try {
                 telecom.getCurrentTtyMode(null, null)
             } catch (_: NoSuchMethodError) {
-                val getCurrentTtyModeMethod = telecom.javaClass.getMethod(
-                    "getCurrentTtyMode",
-                    String::class.java,
-                )
+                val getCurrentTtyModeMethod =
+                    telecom.javaClass.getMethod(
+                        "getCurrentTtyMode",
+                        String::class.java,
+                    )
                 (getCurrentTtyModeMethod.invoke(telecom, null) as Int)
             } == TelecomManager.TTY_MODE_OFF
         }
@@ -702,14 +776,15 @@ class SubscriptionModer(
             !this.isMmTelProvisioningRequired(
                 MmTelFeature.MmTelCapabilities.CAPABILITY_TYPE_VOICE,
                 ImsRegistrationImplBase.REGISTRATION_TECH_LTE,
-            ) || try {
-                this.getImsProvisionedBoolNoException(
-                    MmTelFeature.MmTelCapabilities.CAPABILITY_TYPE_VOICE,
-                    ImsRegistrationImplBase.REGISTRATION_TECH_LTE,
-                )
-            } catch (_: NoSuchMethodError) {
-                this.getProvisionedBoolNoException(ImsConfig.ConfigConstants.VLT_SETTING_ENABLED)
-            }
+            ) ||
+                try {
+                    this.getImsProvisionedBoolNoException(
+                        MmTelFeature.MmTelCapabilities.CAPABILITY_TYPE_VOICE,
+                        ImsRegistrationImplBase.REGISTRATION_TECH_LTE,
+                    )
+                } catch (_: NoSuchMethodError) {
+                    this.getProvisionedBoolNoException(ImsConfig.ConfigConstants.VLT_SETTING_ENABLED)
+                }
 
     fun setVoLteProvisioned(isProvisioned: Boolean) {
         try {
@@ -732,7 +807,7 @@ class SubscriptionModer(
     val isVolteUiEditable: Boolean
         get() =
             this.getBooleanValue(CarrierConfigManager.KEY_EDITABLE_ENHANCED_4G_LTE_BOOL) &&
-                    !this.getBooleanValue(CarrierConfigManager.KEY_HIDE_ENHANCED_4G_LTE_BOOL)
+                !this.getBooleanValue(CarrierConfigManager.KEY_HIDE_ENHANCED_4G_LTE_BOOL)
 
     val isVolteSupportedBySystem: Boolean
         get() {
@@ -770,7 +845,8 @@ class SubscriptionModer(
 
     val isVolteSupported: Boolean
         get() =
-            this.isVolteSupportedBySystem || this.isVolteSupportedByUser || isVolteSupportedByDevice && this.isVolteSupportedByCarrier && this.isGbaValid
+            this.isVolteSupportedBySystem || this.isVolteSupportedByUser ||
+                isVolteSupportedByDevice && this.isVolteSupportedByCarrier && this.isGbaValid
 
     val isLtePlusEnabledByCarrier: Boolean
         get() =
@@ -789,7 +865,7 @@ class SubscriptionModer(
 
     fun setVolteEnabled(enabled: Boolean) {
         if (!this.isVolteSupportedByUser && !this.isVolteUiEditable) {
-            throw
+            throw IllegalStateException("VoLTE setting is not editable for subscription $subscriptionId")
         }
         this.updateCarrierConfig(CarrierConfigManager.KEY_ENHANCED_4G_LTE_ON_BY_DEFAULT_BOOL, enabled)
         this.updateCarrierConfig(CarrierConfigManager.KEY_EDITABLE_ENHANCED_4G_LTE_BOOL, true)
@@ -815,7 +891,8 @@ class SubscriptionModer(
 
     val isVolteEnabled: Boolean
         get() =
-            isVolteSupported && this.isLtePlusEnabled && this.isNonTtyOrTtyOnVolteEnabled && (Build.VERSION.SDK_INT <= VERSION_CODES.Q || this.isVolteProvisioned)
+            isVolteSupported && this.isLtePlusEnabled && this.isNonTtyOrTtyOnVolteEnabled &&
+                (Build.VERSION.SDK_INT <= VERSION_CODES.Q || this.isVolteProvisioned)
 
     val isVoNrConfigEnabled: Boolean
         @RequiresApi(VERSION_CODES.UPSIDE_DOWN_CAKE)

@@ -4,16 +4,15 @@ import android.app.StatusBarManager
 import android.content.ComponentName
 import android.graphics.drawable.Icon
 import android.os.Build
-import android.os.Build.VERSION
 import android.os.Build.VERSION_CODES
 import android.telephony.CarrierConfigManager
-import android.telephony.SubscriptionInfo
 import android.util.Log
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -28,10 +27,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.navigation.NavController
+import dev.bluehouse.enablevolte.LocalSubscriptionActionGate
 import dev.bluehouse.enablevolte.R
-import dev.bluehouse.enablevolte.ShizukuStatus
 import dev.bluehouse.enablevolte.SubscriptionModer
-import dev.bluehouse.enablevolte.checkShizukuPermission
+import dev.bluehouse.enablevolte.asyncTry
 import dev.bluehouse.enablevolte.components.BooleanPropertyView
 import dev.bluehouse.enablevolte.components.ClickablePropertyView
 import dev.bluehouse.enablevolte.components.HeaderText
@@ -39,47 +38,105 @@ import dev.bluehouse.enablevolte.components.InfiniteLoadingDialog
 import dev.bluehouse.enablevolte.components.RadioSelectPropertyView
 import dev.bluehouse.enablevolte.components.UserAgentPropertyView
 import dev.bluehouse.enablevolte.configPersistent
-import dev.bluehouse.enablevolte.asyncUpdate
+import dev.bluehouse.enablevolte.rememberSubscriptionActionGate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.lang.IllegalStateException
+
+private data class ConfigScreenState(
+    val carrierName: String?,
+    val simSlotIndex: Int,
+    val volteSupportedBySystem: Boolean,
+    val volteSupportedByUser: Boolean,
+    val volteSupportedByDevice: Boolean,
+    val volteSupportedByCarrier: Boolean,
+    val volteGbaSatisfied: Boolean,
+    val volteUiEditable: Boolean,
+    val ltePlusEnabledByCarrier: Boolean,
+    val volteTtySatisfied: Boolean,
+    val volteProvisioningSatisfied: Boolean,
+    val volteEnabled: Boolean,
+    val voNREnabled: Boolean,
+    val crossSIMEnabled: Boolean,
+    val voWiFiEnabled: Boolean,
+    val voWiFiEnabledWhileRoaming: Boolean,
+    val showIMSinSIMInfo: Boolean,
+    val allowAddingAPNs: Boolean,
+    val showVoWifiMode: Boolean,
+    val showVoWifiRoamingMode: Boolean,
+    val wfcSpnFormatIndex: Int,
+    val showVoWifiIcon: Boolean,
+    val alwaysDataRATIcon: Boolean,
+    val supportWfcWifiOnly: Boolean,
+    val vtEnabled: Boolean,
+    val ssOverUtEnabled: Boolean,
+    val ssOverCDMAEnabled: Boolean,
+    val show4GForLteEnabled: Boolean,
+    val hideEnhancedDataIconEnabled: Boolean,
+    val configuredUserAgent: String,
+)
+
+private fun readConfigScreenState(moder: SubscriptionModer): ConfigScreenState =
+    ConfigScreenState(
+        carrierName = moder.carrierName,
+        simSlotIndex = moder.simSlotIndex,
+        volteSupportedBySystem = moder.isVolteSupportedBySystem,
+        volteSupportedByUser = moder.isVolteSupportedByUser,
+        volteSupportedByDevice = moder.isVolteSupportedByDevice,
+        volteSupportedByCarrier = moder.isVolteSupportedByCarrier,
+        volteGbaSatisfied = moder.isGbaValid,
+        volteUiEditable = moder.isVolteUiEditable,
+        ltePlusEnabledByCarrier = moder.isLtePlusEnabledByCarrier,
+        volteTtySatisfied = moder.isNonTtyOrTtyOnVolteEnabled,
+        volteProvisioningSatisfied = Build.VERSION.SDK_INT <= VERSION_CODES.Q || moder.isVolteProvisioned,
+        volteEnabled = moder.isVolteEnabled,
+        voNREnabled = Build.VERSION.SDK_INT >= VERSION_CODES.UPSIDE_DOWN_CAKE && moder.isVoNrConfigEnabled,
+        crossSIMEnabled = moder.isCrossSIMConfigEnabled,
+        voWiFiEnabled = moder.isVoWifiConfigEnabled,
+        voWiFiEnabledWhileRoaming = moder.isVoWifiWhileRoamingEnabled,
+        showIMSinSIMInfo = Build.VERSION.SDK_INT >= VERSION_CODES.R && moder.showIMSinSIMInfo,
+        allowAddingAPNs = moder.allowAddingAPNs,
+        showVoWifiMode = Build.VERSION.SDK_INT >= VERSION_CODES.R && moder.showVoWifiMode,
+        showVoWifiRoamingMode = Build.VERSION.SDK_INT >= VERSION_CODES.R && moder.showVoWifiRoamingMode,
+        wfcSpnFormatIndex = moder.wfcSpnFormatIndex,
+        showVoWifiIcon = moder.showVoWifiIcon,
+        alwaysDataRATIcon = Build.VERSION.SDK_INT >= VERSION_CODES.R && moder.alwaysDataRATIcon,
+        supportWfcWifiOnly = moder.supportWfcWifiOnly,
+        vtEnabled = moder.isVtConfigEnabled,
+        ssOverUtEnabled = moder.ssOverUtEnabled,
+        ssOverCDMAEnabled = moder.ssOverCDMAEnabled,
+        show4GForLteEnabled = Build.VERSION.SDK_INT >= VERSION_CODES.R && moder.isShow4GForLteEnabled,
+        hideEnhancedDataIconEnabled = Build.VERSION.SDK_INT >= VERSION_CODES.R && moder.isHideEnhancedDataIconEnabled,
+        configuredUserAgent = moder.userAgentConfig ?: "",
+    )
 
 @Suppress("ktlint:standard:function-naming")
 @Composable
 fun Config(
-    subscriptions: List<SubscriptionInfo>,
     navController: NavController,
     subId: Int,
+    onInvalidAccess: () -> Unit,
 ) {
-    val TAG = "HomeActivity:Config"
-
-    val moder = SubscriptionModer(LocalContext.current, subId)
-    val carrierName = moder.carrierName
-    val scrollState = rememberScrollState()
+    val tag = "HomeActivity:Config"
     val context = LocalContext.current
-    val cannotFindKeyText = stringResource(R.string.cannot_find_key)
-    var configurable by rememberSaveable { mutableStateOf(false) }
-    val volteSupportedBySystem = moder.isVolteSupportedBySystem
+    val moder = remember(context, subId) { SubscriptionModer(context, subId) }
+    val actionGate =
+        rememberSubscriptionActionGate(moder) {
+            onInvalidAccess()
+        }
+    val scope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
+
+    var carrierName by rememberSaveable { mutableStateOf<String?>(null) }
+    var simSlotIndex by rememberSaveable { mutableIntStateOf(0) }
+    var volteSupportedBySystem by rememberSaveable { mutableStateOf(false) }
     var volteSupportedByUser by rememberSaveable { mutableStateOf(false) }
-    val volteSupportedByDevice = moder.isVolteSupportedByDevice
+    var volteSupportedByDevice by rememberSaveable { mutableStateOf(false) }
     var volteSupportedByCarrier by rememberSaveable { mutableStateOf(false) }
     var volteGbaSatisfied by rememberSaveable { mutableStateOf(false) }
     var volteUiEditable by rememberSaveable { mutableStateOf(false) }
     var ltePlusEnabledByCarrier by rememberSaveable { mutableStateOf(false) }
     var volteTtySatisfied by rememberSaveable { mutableStateOf(false) }
     var volteProvisioningSatisfied by rememberSaveable { mutableStateOf(false) }
-    val volteConfigPersistent by remember {
-        val volteSupportedByCarrier = moder.isVolteSupportedByCarrier
-        val volteGbaSatisfied = moder.isGbaValid
-        val volteUiEditable = moder.isVolteUiEditable
-        val ltePlusEnabledByCarrier = moder.isLtePlusEnabledByCarrier
-        val volteTtySatisfied = moder.isNonTtyOrTtyOnVolteEnabled
-        derivedStateOf {
-            configPersistent ||
-                (volteSupportedBySystem || volteSupportedByUser || volteSupportedByDevice && volteSupportedByCarrier && volteGbaSatisfied) &&
-                (volteSupportedByUser || volteUiEditable || ltePlusEnabledByCarrier) && volteTtySatisfied && volteProvisioningSatisfied
-        }
-    }
     var volteEnabled by rememberSaveable { mutableStateOf(false) }
     var voNREnabled by rememberSaveable { mutableStateOf(false) }
     var crossSIMEnabled by rememberSaveable { mutableStateOf(false) }
@@ -99,79 +156,100 @@ fun Config(
     var show4GForLteEnabled by rememberSaveable { mutableStateOf(false) }
     var hideEnhancedDataIconEnabled by rememberSaveable { mutableStateOf(false) }
     var configuredUserAgent by rememberSaveable { mutableStateOf("") }
-    var configurableItems by rememberSaveable { mutableStateOf<Map<String, String>>(mapOf()) }
-    var reversedConfigurableItems by rememberSaveable { mutableStateOf<Map<String, String>>(mapOf()) }
     var loading by rememberSaveable { mutableStateOf(true) }
-    val scope = rememberCoroutineScope()
-    val simSlotIndex = moder.simSlotIndex
 
-    fun loadFlags() {
-        Log.d(TAG, "loadFlags")
-        configurableItems =
-            listOf(CarrierConfigManager::class.java, *CarrierConfigManager::class.java.declaredClasses)
-                .map {
-                    it.declaredFields.filter { field ->
-                        field.name != "KEY_PREFIX" && field.name.startsWith("KEY_")
-                    }
-                }.flatten()
-                .associate { field -> field.name to field.get(field) as String }
-        reversedConfigurableItems = configurableItems.entries.associate { (k, v) -> v to k }
-        volteSupportedByUser = moder.isVolteSupportedByUser
-        volteSupportedByCarrier = moder.isVolteSupportedByCarrier
-        volteGbaSatisfied = moder.isGbaValid
-        volteUiEditable = moder.isVolteUiEditable
-        ltePlusEnabledByCarrier = moder.isLtePlusEnabledByCarrier
-        volteTtySatisfied = moder.isNonTtyOrTtyOnVolteEnabled
-        volteProvisioningSatisfied = Build.VERSION.SDK_INT <= VERSION_CODES.Q || moder.isVolteProvisioned
-        volteEnabled = moder.isVolteEnabled
-        voNREnabled = VERSION.SDK_INT >= VERSION_CODES.UPSIDE_DOWN_CAKE && moder.isVoNrConfigEnabled
-        crossSIMEnabled = moder.isCrossSIMConfigEnabled
-        voWiFiEnabled = moder.isVoWifiConfigEnabled
-        voWiFiEnabledWhileRoaming = moder.isVoWifiWhileRoamingEnabled
-        showIMSinSIMInfo = VERSION.SDK_INT >= VERSION_CODES.R && moder.showIMSinSIMInfo
-        allowAddingAPNs = moder.allowAddingAPNs
-        showVoWifiMode = VERSION.SDK_INT >= VERSION_CODES.R && moder.showVoWifiMode
-        showVoWifiRoamingMode = VERSION.SDK_INT >= VERSION_CODES.R && moder.showVoWifiRoamingMode
-        wfcSpnFormatIndex = moder.wfcSpnFormatIndex
-        showVoWifiIcon = moder.showVoWifiIcon
-        alwaysDataRATIcon = VERSION.SDK_INT >= VERSION_CODES.R && moder.alwaysDataRATIcon
-        supportWfcWifiOnly = moder.supportWfcWifiOnly
-        vtEnabled = moder.isVtConfigEnabled
-        ssOverUtEnabled = moder.ssOverUtEnabled
-        ssOverCDMAEnabled = moder.ssOverCDMAEnabled
-        show4GForLteEnabled = VERSION.SDK_INT >= VERSION_CODES.R && moder.isShow4GForLteEnabled
-        hideEnhancedDataIconEnabled = VERSION.SDK_INT >= VERSION_CODES.R && moder.isHideEnhancedDataIconEnabled
-        configuredUserAgent = moder.userAgentConfig ?: ""
+    fun applyState(state: ConfigScreenState) {
+        Log.d(tag, "applyState")
+        carrierName = state.carrierName
+        simSlotIndex = state.simSlotIndex
+        volteSupportedBySystem = state.volteSupportedBySystem
+        volteSupportedByUser = state.volteSupportedByUser
+        volteSupportedByDevice = state.volteSupportedByDevice
+        volteSupportedByCarrier = state.volteSupportedByCarrier
+        volteGbaSatisfied = state.volteGbaSatisfied
+        volteUiEditable = state.volteUiEditable
+        ltePlusEnabledByCarrier = state.ltePlusEnabledByCarrier
+        volteTtySatisfied = state.volteTtySatisfied
+        volteProvisioningSatisfied = state.volteProvisioningSatisfied
+        volteEnabled = state.volteEnabled
+        voNREnabled = state.voNREnabled
+        crossSIMEnabled = state.crossSIMEnabled
+        voWiFiEnabled = state.voWiFiEnabled
+        voWiFiEnabledWhileRoaming = state.voWiFiEnabledWhileRoaming
+        showIMSinSIMInfo = state.showIMSinSIMInfo
+        allowAddingAPNs = state.allowAddingAPNs
+        showVoWifiMode = state.showVoWifiMode
+        showVoWifiRoamingMode = state.showVoWifiRoamingMode
+        wfcSpnFormatIndex = state.wfcSpnFormatIndex
+        showVoWifiIcon = state.showVoWifiIcon
+        alwaysDataRATIcon = state.alwaysDataRATIcon
+        supportWfcWifiOnly = state.supportWfcWifiOnly
+        vtEnabled = state.vtEnabled
+        ssOverUtEnabled = state.ssOverUtEnabled
+        ssOverCDMAEnabled = state.ssOverCDMAEnabled
+        show4GForLteEnabled = state.show4GForLteEnabled
+        hideEnhancedDataIconEnabled = state.hideEnhancedDataIconEnabled
+        configuredUserAgent = state.configuredUserAgent
     }
 
-    LaunchedEffect(true) {
+    fun refreshFlagsOrRecover() {
+        try {
+            applyState(readConfigScreenState(moder))
+        } catch (_: IllegalStateException) {
+            onInvalidAccess()
+        }
+    }
+
+    val volteConfigPersistent by remember(
+        volteSupportedBySystem,
+        volteSupportedByUser,
+        volteSupportedByDevice,
+        volteSupportedByCarrier,
+        volteGbaSatisfied,
+        volteUiEditable,
+        ltePlusEnabledByCarrier,
+        volteTtySatisfied,
+        volteProvisioningSatisfied,
+    ) {
+        derivedStateOf {
+            configPersistent ||
+                (
+                    volteSupportedBySystem ||
+                        volteSupportedByUser ||
+                        (volteSupportedByDevice && volteSupportedByCarrier && volteGbaSatisfied)
+                ) &&
+                (volteSupportedByUser || volteUiEditable || ltePlusEnabledByCarrier) &&
+                volteTtySatisfied &&
+                volteProvisioningSatisfied
+        }
+    }
+
+    LaunchedEffect(moder) {
         loading = true
-        if (checkShizukuPermission(0) == ShizukuStatus.GRANTED) {
-            if (subId >= 0) {
-                configurable =
-                    try {
-                        withContext(Dispatchers.Default) {
-                            loadFlags()
-                        }
-                        true
-                    } catch (e: IllegalStateException) {
-                        false
-                    } finally {
-                        loading = false
+        if (subId >= 0) {
+            try {
+                val state =
+                    withContext(Dispatchers.Default) {
+                        readConfigScreenState(moder)
                     }
-            } else {
+                applyState(state)
+            } catch (_: IllegalStateException) {
+            } finally {
                 loading = false
-                configurable = false
             }
         } else {
             loading = false
-            configurable = false
         }
     }
 
     if (loading) {
         InfiniteLoadingDialog()
-    } else {
+        return
+    }
+
+    val currentCarrierName = carrierName.orEmpty()
+
+    CompositionLocalProvider(LocalSubscriptionActionGate provides actionGate) {
         Column(modifier = Modifier.padding(Dp(16f)).verticalScroll(scrollState)) {
             BooleanPropertyView(
                 label = stringResource(R.string.persist_config),
@@ -190,7 +268,7 @@ fun Config(
             BooleanPropertyView(label = stringResource(R.string.volte_supported_by_carrier), toggled = volteSupportedByCarrier)
             BooleanPropertyView(label = stringResource(R.string.volte_gba_satisfied), toggled = volteGbaSatisfied)
             BooleanPropertyView(label = stringResource(R.string.volte_tty_satisfied), toggled = volteTtySatisfied)
-            BooleanPropertyView(label = stringResource(R.string.volte_provisioned), toggled = volteProvisioned)
+            BooleanPropertyView(label = stringResource(R.string.volte_provisioning_satisfied), toggled = volteProvisioningSatisfied)
 
             HeaderText(text = stringResource(R.string.feature_toggles))
             BooleanPropertyView(
@@ -198,36 +276,32 @@ fun Config(
                 toggled = volteEnabled,
                 enabled = !volteEnabled || volteSupportedByUser || volteUiEditable || ltePlusEnabledByCarrier,
             ) {
-                asyncUpdate(scope) {
-                    update {
-                        if (configPersistentVoLTE) {
-                            moder.setVoImsOptInSetting(!voLTEEnabled)
+                asyncTry(scope) {
+                    async {
+                        if (!volteEnabled) {
+                            if (volteConfigPersistent) {
+                                moder.setVolteSupportedByUser(true)
+                            }
+                            moder.setGbaRequired(false)
+                            moder.setVoLteProvisioned(true)
                         }
-                        moder.updateCarrierConfig(CarrierConfigManager.KEY_CARRIER_VOLTE_AVAILABLE_BOOL, !voLTEEnabled)
-                        moder.updateCarrierConfig(CarrierConfigManager.KEY_CARRIER_IMS_GBA_REQUIRED_BOOL, false)
-                        moder.setVoLteProvisioned(true)
-                        moder.set4GPlus(true)
+                        moder.setVolteEnabled(!volteEnabled)
                         moder.restartIMSRegistration()
                     }
                     ok {
-                        if (!voLTEEnabled) {
-                            voImsOptInEnabled = true
-                            gbaRequired = false
-                            ttyOverVoLTEEnabled = true
-                            voLTEProvisioned = true
-                            is4GPlusEnabled = true
-                        }
-                        voLTEEnabled = !voLTEEnabled
+                        refreshFlagsOrRecover()
+                    }
+                    error {
+                        onInvalidAccess()
                     }
                 }
             }
-
             BooleanPropertyView(
                 label = stringResource(R.string.enable_vonr),
                 toggled = voNREnabled,
                 minSdk = VERSION_CODES.UPSIDE_DOWN_CAKE,
             ) {
-                if (VERSION.SDK_INT >= VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                if (Build.VERSION.SDK_INT >= VERSION_CODES.UPSIDE_DOWN_CAKE) {
                     voNREnabled =
                         if (voNREnabled) {
                             moder.updateCarrierConfig(CarrierConfigManager.KEY_VONR_ENABLED_BOOL, false)
@@ -241,13 +315,12 @@ fun Config(
                         }
                 }
             }
-
             BooleanPropertyView(
                 label = stringResource(R.string.enable_crosssim),
                 toggled = crossSIMEnabled,
                 minSdk = VERSION_CODES.TIRAMISU,
             ) {
-                if (VERSION.SDK_INT >= VERSION_CODES.TIRAMISU) {
+                if (Build.VERSION.SDK_INT >= VERSION_CODES.TIRAMISU) {
                     crossSIMEnabled =
                         if (crossSIMEnabled) {
                             moder.updateCarrierConfig(CarrierConfigManager.KEY_CARRIER_CROSS_SIM_IMS_AVAILABLE_BOOL, false)
@@ -283,7 +356,7 @@ fun Config(
                         true
                     }
             }
-            if (VERSION.SDK_INT >= VERSION_CODES.Q) {
+            if (Build.VERSION.SDK_INT >= VERSION_CODES.Q) {
                 BooleanPropertyView(
                     label = stringResource(R.string.enable_ss_over_ut),
                     toggled = ssOverUtEnabled,
@@ -345,7 +418,7 @@ fun Config(
             }
 
             HeaderText(text = stringResource(R.string.cosmetic_toggles))
-            if (VERSION.SDK_INT >= VERSION_CODES.R) {
+            if (Build.VERSION.SDK_INT >= VERSION_CODES.R) {
                 BooleanPropertyView(
                     label = stringResource(R.string.show_vowifi_preference_in_settings),
                     toggled = showVoWifiMode,
@@ -368,7 +441,7 @@ fun Config(
                         }
                 }
             }
-            if (VERSION.SDK_INT >= VERSION_CODES.R) {
+            if (Build.VERSION.SDK_INT >= VERSION_CODES.R) {
                 BooleanPropertyView(
                     label = stringResource(R.string.show_vowifi_roaming_preference_in_settings),
                     toggled = showVoWifiRoamingMode,
@@ -395,18 +468,18 @@ fun Config(
                 label = stringResource(R.string.wi_fi_calling_carrier_name_format),
                 values =
                     arrayOf(
-                        "%s".format(carrierName),
-                        "%s Wi-Fi Calling".format(carrierName),
+                        "%s".format(currentCarrierName),
+                        "%s Wi-Fi Calling".format(currentCarrierName),
                         "WLAN Call",
-                        "%s WLAN Call".format(carrierName),
-                        "%s Wi-Fi".format(carrierName),
-                        "WiFi Calling | %s".format(carrierName),
-                        "%s VoWifi".format(carrierName),
+                        "%s WLAN Call".format(currentCarrierName),
+                        "%s Wi-Fi".format(currentCarrierName),
+                        "WiFi Calling | %s".format(currentCarrierName),
+                        "%s VoWifi".format(currentCarrierName),
                         "Wi-Fi Calling",
                         "Wi-Fi",
                         "WiFi Calling",
                         "VoWifi",
-                        "%s WiFi Calling".format(carrierName),
+                        "%s WiFi Calling".format(currentCarrierName),
                         "WiFi Call",
                     ),
                 selectedIndex = wfcSpnFormatIndex,
@@ -435,7 +508,7 @@ fun Config(
                         true
                     }
             }
-            if (VERSION.SDK_INT >= VERSION_CODES.R) {
+            if (Build.VERSION.SDK_INT >= VERSION_CODES.R) {
                 BooleanPropertyView(
                     label = stringResource(R.string.always_show_data_icon),
                     toggled = alwaysDataRATIcon,
@@ -518,8 +591,8 @@ fun Config(
                 }
             }
 
-            if (VERSION.SDK_INT >= VERSION_CODES.TIRAMISU) {
-                val statusBarManager: StatusBarManager = context.getSystemService(StatusBarManager::class.java)
+            if (Build.VERSION.SDK_INT >= VERSION_CODES.TIRAMISU) {
+                val statusBarManager = context.getSystemService(StatusBarManager::class.java)
 
                 HeaderText(text = stringResource(R.string.qstile))
                 ClickablePropertyView(
@@ -554,18 +627,26 @@ fun Config(
                     )
                 }
             }
+
             HeaderText(text = stringResource(R.string.miscellaneous))
             ClickablePropertyView(
                 label = stringResource(R.string.reset_all_settings),
                 value = stringResource(R.string.reverts_to_carrier_default),
             ) {
-                loading = true
-                updateRefresh(scope) {
-                    update {
-                        moder.clearCarrierConfig()
-                        loadFlags()
+                asyncTry(scope) {
+                    before {
+                        loading = true
                     }
-                    refresh {
+                    async {
+                        moder.clearCarrierConfig()
+                    }
+                    ok {
+                        refreshFlagsOrRecover()
+                    }
+                    error {
+                        onInvalidAccess()
+                    }
+                    always {
                         loading = false
                     }
                 }
@@ -586,12 +667,20 @@ fun Config(
                 label = stringResource(R.string.restart_ims_registration),
                 value = "",
             ) {
-                loading = true
-                updateRefresh(scope) {
-                    update {
+                asyncTry(scope) {
+                    before {
+                        loading = true
+                    }
+                    async {
                         moder.restartIMSRegistration()
                     }
-                    refresh {
+                    ok {
+                        refreshFlagsOrRecover()
+                    }
+                    error {
+                        onInvalidAccess()
+                    }
+                    always {
                         loading = false
                     }
                 }

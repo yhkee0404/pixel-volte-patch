@@ -1,7 +1,6 @@
 package dev.bluehouse.enablevolte.pages
 
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.telephony.SubscriptionInfo
 import android.util.Log
 import androidx.compose.foundation.layout.Column
@@ -20,13 +19,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.core.net.toUri
-import androidx.navigation.NavController
 import dev.bluehouse.enablevolte.BuildConfig
-import dev.bluehouse.enablevolte.CarrierModer
 import dev.bluehouse.enablevolte.R
-import dev.bluehouse.enablevolte.ShizukuStatus
 import dev.bluehouse.enablevolte.SubscriptionModer
-import dev.bluehouse.enablevolte.checkShizukuPermission
 import dev.bluehouse.enablevolte.components.BooleanPropertyView
 import dev.bluehouse.enablevolte.components.ClickablePropertyView
 import dev.bluehouse.enablevolte.components.HeaderText
@@ -37,7 +32,6 @@ import dev.bluehouse.enablevolte.uniqueName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import net.swiftzer.semver.SemVer
-import rikka.shizuku.Shizuku
 
 const val TAG = "HomeActivity:Home"
 
@@ -45,48 +39,32 @@ const val TAG = "HomeActivity:Home"
 @Composable
 fun Home(
     subscriptions: List<SubscriptionInfo>,
-    navController: NavController,
+    shizukuEnabled: Boolean,
+    shizukuGranted: Boolean,
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
-
-    var shizukuEnabled by rememberSaveable { mutableStateOf(false) }
-    var shizukuGranted by rememberSaveable { mutableStateOf(false) }
-
     var isIMSRegistered by remember(subscriptions) { mutableStateOf(listOf<Boolean>()) }
     var newerVersion by rememberSaveable { mutableStateOf("") }
     var loading by rememberSaveable { mutableStateOf(true) }
 
-    fun loadFlags() {
-        shizukuGranted = true
-        isIMSRegistered = subscriptions.map { SubscriptionModer(context, it.subscriptionId).isIMSRegistered }
-    }
-
-    LaunchedEffect(subscriptions) {
+    LaunchedEffect(subscriptions, shizukuGranted) {
         loading = true
         try {
-            when (checkShizukuPermission(0)) {
-                ShizukuStatus.GRANTED -> {
-                    shizukuEnabled = true
-                    loading = true
+            if (!shizukuGranted) {
+                isIMSRegistered = emptyList()
+            } else {
+                val imsStates =
                     withContext(Dispatchers.Default) {
-                        loadFlags()
-                    }
-                }
-                ShizukuStatus.NOT_GRANTED -> {
-                    shizukuEnabled = true
-                    withContext(Dispatchers.Default) {
-                        Shizuku.addRequestPermissionResultListener { _, grantResult ->
-                            if (grantResult == PackageManager.PERMISSION_GRANTED) {
-                                loading = true
-                                loadFlags()
+                        subscriptions.map { subscription ->
+                            try {
+                                SubscriptionModer(context, subscription.subscriptionId).isIMSRegistered
+                            } catch (_: IllegalStateException) {
+                                false
                             }
                         }
                     }
-                }
-                else -> {
-                    shizukuEnabled = false
-                }
+                isIMSRegistered = imsStates
             }
             getLatestAppVersion {
                 Log.d(TAG, "Fetched version $it")
@@ -97,7 +75,7 @@ fun Home(
                 }
             }
         } catch (_: IllegalStateException) {
-            shizukuEnabled = false
+            isIMSRegistered = emptyList()
         } finally {
             loading = false
         }
@@ -130,7 +108,7 @@ fun Home(
                 HeaderText(text = stringResource(R.string.ims_status_for, subscriptions[idx].uniqueName))
                 BooleanPropertyView(
                     label = stringResource(R.string.ims_status),
-                    toggled = isIMSRegistered[idx],
+                    toggled = isIMSRegistered.getOrNull(idx) ?: false,
                     trueLabel = stringResource(R.string.registered),
                     falseLabel = stringResource(R.string.unregistered),
                 )

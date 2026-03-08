@@ -17,6 +17,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.bluehouse.enablevolte.LocalSubscriptionActionGate
 import dev.bluehouse.enablevolte.R
 
 @Composable
@@ -29,6 +30,10 @@ fun ClickablePropertyView(
     valueFontFamily: FontFamily? = null,
     onClick: (() -> Unit)? = null,
 ) {
+    val guardedOnClick =
+        onClick?.let {
+            LocalSubscriptionActionGate.current?.guard(it) ?: it
+        }
     if (value == null) {
         Column(modifier = Modifier.padding(top = 12.dp, bottom = 12.dp)) {
             Text(text = label, fontSize = labelFontSize, modifier = Modifier.padding(bottom = 4.dp))
@@ -36,8 +41,8 @@ fun ClickablePropertyView(
         }
         return
     }
-    if (onClick != null) {
-        Surface(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+    if (guardedOnClick != null) {
+        Surface(onClick = guardedOnClick, modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(top = 12.dp, bottom = 12.dp)) {
                 Text(text = label, modifier = Modifier.padding(bottom = 4.dp), fontSize = labelFontSize, fontFamily = labelFontFamily)
                 Text(text = value, color = MaterialTheme.colorScheme.outline, fontSize = valueFontSize, fontFamily = valueFontFamily)

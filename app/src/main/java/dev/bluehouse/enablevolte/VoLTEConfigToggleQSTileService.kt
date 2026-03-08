@@ -45,7 +45,7 @@ open class VoLTEConfigToggleQSTileService(
          */
         val moder = this.moder ?: return null
         try {
-            return moder.isVoLteConfigEnabled
+            return moder.isVolteEnabled
         } catch (_: IllegalStateException) {
         }
         return null

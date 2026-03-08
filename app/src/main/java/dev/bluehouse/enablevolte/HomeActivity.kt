@@ -1,17 +1,13 @@
 package dev.bluehouse.enablevolte
 
-import android.content.Context
-import android.content.pm.PackageManager
 import android.os.Bundle
 import android.telephony.SubscriptionInfo
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -35,18 +31,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.noLocalProvidedFor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.Lifecycle
 import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.navigation
@@ -58,9 +51,12 @@ import dev.bluehouse.enablevolte.pages.DumpedConfig
 import dev.bluehouse.enablevolte.pages.Editor
 import dev.bluehouse.enablevolte.pages.Home
 import dev.bluehouse.enablevolte.ui.theme.EnableVoLTETheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.lsposed.hiddenapibypass.HiddenApiBypass
 import rikka.shizuku.Shizuku
-import java.lang.IllegalStateException
 
 data class Screen(
     val route: String,
@@ -90,79 +86,116 @@ class HomeActivity : ComponentActivity() {
     }
 }
 
-val LocalContext = staticCompositionLocalOf<Context> { noLocalProvidedFor("LocalContext") }
-
 @Suppress("ktlint:standard:function-naming")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PixelIMSApp() {
-    val TAG = "HomeActivity"
-
-    val context = LocalContext.current
+    val context = LocalContext.current.applicationContext
     val navController = rememberNavController()
-    val carrierModer = CarrierModer(context)
+    val carrierModer = remember(context) { CarrierModer(context) }
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
-    var loading by rememberSaveable { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
+    var loading by rememberSaveable { mutableStateOf(true) }
+    var shizukuEnabled by rememberSaveable { mutableStateOf(false) }
+    var shizukuGranted by rememberSaveable { mutableStateOf(false) }
+    var permissionRequestInFlight by rememberSaveable { mutableStateOf(false) }
+    var permissionResultReceived by rememberSaveable { mutableStateOf(false) }
+    var refreshHomeOnResume by remember { mutableStateOf(false) }
 
-    var subscriptions by rememberSaveable { mutableStateOf(listOf<SubscriptionInfo>()) }
-    var navBuilder by remember(subscriptions) {
-        mutableStateOf<NavGraphBuilder.() -> Unit>({
-            composable("home", context.resources.getString(R.string.home)) {
-                Home(subscriptions, navController)
+    var subscriptions by remember { mutableStateOf(listOf<SubscriptionInfo>()) }
+    var loadJob by remember { mutableStateOf<Job?>(null) }
+    val currentRoute = currentBackStackEntry?.destination?.route
+    val isHomeRoute = currentRoute == "home"
+
+    fun navigateToHome() {
+        navController.navigate("home") {
+            popUpTo(navController.graph.findStartDestination().id) {
+                saveState = false
             }
-            for (subscription in subscriptions) {
-                navigation(startDestination = "config${subscription.subscriptionId}", route = "config${subscription.subscriptionId}root") {
-                    composable("config${subscription.subscriptionId}", context.resources.getString(R.string.sim_config)) {
-                        Config(subscriptions, navController, subscription.subscriptionId)
-                    }
-                    composable("config${subscription.subscriptionId}/dump", context.resources.getString(R.string.config_dump_viewer)) {
-                        DumpedConfig(subscriptions, context, subscription.subscriptionId)
-                    }
-                    composable("config${subscription.subscriptionId}/edit", context.resources.getString(R.string.expert_mode)) {
-                        Editor(subscriptions, subscription.subscriptionId)
-                    }
-                }
-            }
-        })
+            launchSingleTop = true
+            restoreState = false
+        }
     }
 
-    val loadApplication = remember { {
-            asyncTry(scope) {
-                before {
-                    loading = true
-                }
-                async {
-                    val shizukuStatus = checkShizukuPermission(0)
+    fun refreshRootState() {
+        if (loadJob?.isActive == true) {
+            return
+        }
+
+        loading = true
+        loadJob =
+            scope.launch {
+                try {
+                    val shizukuStatus = getShizukuStatus()
+                    shizukuEnabled = shizukuStatus != ShizukuStatus.STOPPED
+                    shizukuGranted = shizukuStatus == ShizukuStatus.GRANTED
+
                     if (shizukuStatus != ShizukuStatus.GRANTED) {
-                        throw kotlin.IllegalStateException("Shizuku not granted or stopped")
+                        subscriptions = emptyList()
+                        SubscriptionModer.recreateDependencies()
+                        if (shizukuStatus == ShizukuStatus.NOT_GRANTED &&
+                            !permissionRequestInFlight &&
+                            !permissionResultReceived &&
+                            !Shizuku.shouldShowRequestPermissionRationale()
+                        ) {
+                            permissionRequestInFlight = true
+                            requestShizukuPermission(0)
+                        }
+                        return@launch
                     }
-                    Log.d(TAG, "Shizuku granted")
-                    carrierModer.setAirplaneMode(false)
-                    carrierModer.setImsRegistrationState(true)
-                    subscriptions = carrierModer.subscriptions
-                }
-                error {
-                    subscriptions = listOf()
-                }
-                always {
+
+                    subscriptions =
+                        try {
+                            withContext(Dispatchers.Default) {
+                                carrierModer.setAirplaneMode(false)
+                                carrierModer.setImsRegistrationState(true)
+                                carrierModer.subscriptions
+                            }
+                        } catch (_: IllegalStateException) {
+                            emptyList()
+                        }
+                } finally {
                     loading = false
+                    loadJob = null
                 }
             }
-    } }
+    }
+
+    fun recoverSubscriptionScreen() {
+        navigateToHome()
+    }
 
     DisposableEffect(Unit) {
-        val listener = Shizuku.OnRequestPermissionResultListener { _, _ ->
-            loadApplication()
-        }
+        val listener =
+            Shizuku.OnRequestPermissionResultListener { _, _ ->
+                scope.launch {
+                    permissionRequestInFlight = false
+                    permissionResultReceived = true
+                }
+            }
         Shizuku.addRequestPermissionResultListener(listener)
         onDispose {
             Shizuku.removeRequestPermissionResultListener(listener)
         }
     }
+    DisposableEffect(isHomeRoute) {
+        if (isHomeRoute) {
+            refreshRootState()
+        }
+        onDispose {}
+    }
     OnLifecycleEvent { _, event ->
-        if (event == Lifecycle.Event.ON_RESUME) {
-            loadApplication()
+        when (event) {
+            Lifecycle.Event.ON_PAUSE -> {
+                refreshHomeOnResume = isHomeRoute
+            }
+            Lifecycle.Event.ON_RESUME -> {
+                if (refreshHomeOnResume && isHomeRoute) {
+                    refreshRootState()
+                }
+                refreshHomeOnResume = false
+            }
+            else -> {}
         }
     }
 
@@ -193,7 +226,7 @@ fun PixelIMSApp() {
                     actions = {
                         if (currentBackStackEntry?.destination?.route == "home") {
                             IconButton(onClick = {
-                                loadApplication()
+                                refreshRootState()
                             }, colors = IconButtonDefaults.filledIconButtonColors(contentColor = MaterialTheme.colorScheme.onPrimary)) {
                                 Icon(
                                     imageVector = Icons.Filled.Refresh,
@@ -247,7 +280,47 @@ fun PixelIMSApp() {
                 }
             },
         ) { innerPadding ->
-            NavHost(navController, startDestination = "home", Modifier.padding(innerPadding), builder = navBuilder)
+            NavHost(navController, startDestination = "home", modifier = Modifier.padding(innerPadding)) {
+                composable("home", context.resources.getString(R.string.home)) {
+                    Home(
+                        subscriptions = subscriptions,
+                        shizukuEnabled = shizukuEnabled,
+                        shizukuGranted = shizukuGranted,
+                    )
+                }
+                for (subscription in subscriptions) {
+                    navigation(
+                        startDestination = "config${subscription.subscriptionId}",
+                        route = "config${subscription.subscriptionId}root",
+                    ) {
+                        composable("config${subscription.subscriptionId}", context.resources.getString(R.string.sim_config)) {
+                            Config(
+                                navController = navController,
+                                subId = subscription.subscriptionId,
+                                onInvalidAccess = {
+                                    recoverSubscriptionScreen()
+                                },
+                            )
+                        }
+                        composable("config${subscription.subscriptionId}/dump", context.resources.getString(R.string.config_dump_viewer)) {
+                            DumpedConfig(
+                                subId = subscription.subscriptionId,
+                                onInvalidAccess = {
+                                    recoverSubscriptionScreen()
+                                },
+                            )
+                        }
+                        composable("config${subscription.subscriptionId}/edit", context.resources.getString(R.string.expert_mode)) {
+                            Editor(
+                                subId = subscription.subscriptionId,
+                                onInvalidAccess = {
+                                    recoverSubscriptionScreen()
+                                },
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

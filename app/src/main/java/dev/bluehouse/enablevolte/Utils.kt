@@ -30,19 +30,30 @@ enum class ShizukuStatus {
     STOPPED,
 }
 
-fun checkShizukuPermission(code: Int): ShizukuStatus =
+fun getShizukuStatus(): ShizukuStatus =
     if (Shizuku.getBinder() != null) {
         if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
             ShizukuStatus.GRANTED
         } else {
-            if (!Shizuku.shouldShowRequestPermissionRationale()) {
-                Shizuku.requestPermission(0)
-            }
             ShizukuStatus.NOT_GRANTED
         }
     } else {
         ShizukuStatus.STOPPED
     }
+
+fun requestShizukuPermission(code: Int) {
+    if (Shizuku.getBinder() != null && Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+        Shizuku.requestPermission(code)
+    }
+}
+
+fun checkShizukuPermission(code: Int): ShizukuStatus {
+    val status = getShizukuStatus()
+    if (status == ShizukuStatus.NOT_GRANTED && !Shizuku.shouldShowRequestPermissionRationale()) {
+        requestShizukuPermission(code)
+    }
+    return status
+}
 
 val SubscriptionInfo.uniqueName: String
     get() = "${this.displayName} (SIM ${this.simSlotIndex + 1})"
@@ -191,6 +202,78 @@ class AsyncTryScope {
 
     fun always(block: () -> Unit) {
         alwaysBlock = block
+    }
+}
+
+class AsyncUpdateScope {
+    internal var updateBlock: suspend () -> Unit = {}
+    internal var okBlock: () -> Unit = {}
+    internal var errorBlock: () -> Unit = {}
+
+    fun update(block: suspend () -> Unit) {
+        updateBlock = block
+    }
+
+    fun ok(block: () -> Unit) {
+        okBlock = block
+    }
+
+    fun error(block: () -> Unit) {
+        errorBlock = block
+    }
+}
+
+fun asyncUpdate(
+    scope: CoroutineScope,
+    block: AsyncUpdateScope.() -> Unit,
+) {
+    val scopeBlock = AsyncUpdateScope().apply(block)
+    asyncTry(scope) {
+        async {
+            scopeBlock.updateBlock()
+        }
+        ok {
+            scopeBlock.okBlock()
+        }
+        error {
+            scopeBlock.errorBlock()
+        }
+    }
+}
+
+class UpdateRefreshScope {
+    internal var updateBlock: suspend () -> Unit = {}
+    internal var refreshBlock: () -> Unit = {}
+    internal var errorBlock: () -> Unit = {}
+
+    fun update(block: suspend () -> Unit) {
+        updateBlock = block
+    }
+
+    fun refresh(block: () -> Unit) {
+        refreshBlock = block
+    }
+
+    fun error(block: () -> Unit) {
+        errorBlock = block
+    }
+}
+
+fun updateRefresh(
+    scope: CoroutineScope,
+    block: UpdateRefreshScope.() -> Unit,
+) {
+    val scopeBlock = UpdateRefreshScope().apply(block)
+    asyncTry(scope) {
+        async {
+            scopeBlock.updateBlock()
+        }
+        error {
+            scopeBlock.errorBlock()
+        }
+        always {
+            scopeBlock.refreshBlock()
+        }
     }
 }
 

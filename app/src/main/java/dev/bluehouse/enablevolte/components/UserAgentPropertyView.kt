@@ -31,6 +31,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.bluehouse.enablevolte.LocalSubscriptionActionGate
 import dev.bluehouse.enablevolte.R
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -134,13 +135,17 @@ fun UserAgentPropertyView(
 ) {
     val labels = arrayOf(stringResource(R.string.default_), stringResource(R.string.lgu))
     val values = arrayOf(stringResource(R.string.ua_default), stringResource(R.string.ua_lgu))
+    val guardedOnUpdate =
+        onUpdate?.let {
+            LocalSubscriptionActionGate.current?.guard(it) ?: it
+        }
 
     var typedText by rememberSaveable { mutableStateOf("") }
     var openTextEditDialog by rememberSaveable { mutableStateOf(false) }
     var dropdownExpanded by rememberSaveable { mutableStateOf(false) }
     var selectedIndex by rememberSaveable { mutableIntStateOf(if (values.contains(value)) values.indexOf(value) else 0) }
 
-    if (onUpdate != null) {
+    if (guardedOnUpdate != null) {
         if (openTextEditDialog) {
             UserAgentUpdateDialog(
                 labels,
@@ -150,7 +155,7 @@ fun UserAgentPropertyView(
                 dropdownExpanded,
                 onTextUpdate = {
                     typedText = it
-                    onUpdate(typedText)
+                    guardedOnUpdate(typedText)
                 },
                 onIndexUpdate = {
                     selectedIndex = it

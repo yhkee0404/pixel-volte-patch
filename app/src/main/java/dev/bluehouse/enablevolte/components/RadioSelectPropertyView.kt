@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import dev.bluehouse.enablevolte.LocalSubscriptionActionGate
 import dev.bluehouse.enablevolte.R
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -98,14 +99,18 @@ fun RadioSelectPropertyView(
     onUpdate: ((Int) -> Unit)? = null,
 ) {
     var openDialog by rememberSaveable { mutableStateOf(false) }
+    val guardedOnUpdate =
+        onUpdate?.let {
+            LocalSubscriptionActionGate.current?.guard(it) ?: it
+        }
 
-    if (onUpdate != null) {
+    if (guardedOnUpdate != null) {
         if (openDialog) {
             RadioSelectPropertyUpdateDialog(
                 label,
                 values,
                 selectedIndex,
-                onUpdate = { onUpdate(it) },
+                onUpdate = { guardedOnUpdate(it) },
                 onClose = { openDialog = false },
             )
         }

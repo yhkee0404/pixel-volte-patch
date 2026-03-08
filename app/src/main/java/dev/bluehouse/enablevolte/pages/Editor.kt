@@ -1,7 +1,6 @@
 package dev.bluehouse.enablevolte.pages
 
 import android.telephony.CarrierConfigManager
-import android.telephony.SubscriptionInfo
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -38,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -57,12 +57,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import dev.bluehouse.enablevolte.LocalSubscriptionActionGate
 import dev.bluehouse.enablevolte.R
 import dev.bluehouse.enablevolte.SubscriptionModer
 import dev.bluehouse.enablevolte.components.ClickablePropertyView
 import dev.bluehouse.enablevolte.components.FiniteLoadingDialog
 import dev.bluehouse.enablevolte.components.InfiniteLoadingDialog
 import dev.bluehouse.enablevolte.components.ValueType
+import dev.bluehouse.enablevolte.rememberSubscriptionActionGate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.lang.reflect.Field
@@ -325,8 +327,8 @@ fun fieldToDataRow(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun Editor(
-    subscriptions: List<SubscriptionInfo>,
     subId: Int,
+    onInvalidAccess: () -> Unit,
 ) {
     val context = LocalContext.current
     var sections by remember { mutableStateOf(listOf<Section>()) }
@@ -358,39 +360,48 @@ fun Editor(
             }
         }
 
-    val moder = SubscriptionModer(context, subId)
+    val moder = remember(context, subId) { SubscriptionModer(context, subId) }
+    val actionGate =
+        rememberSubscriptionActionGate(moder) {
+            onInvalidAccess()
+        }
 
-    LaunchedEffect(true) {
-        withContext(Dispatchers.Default) {
-            val classes =
-                listOf(
-                    CarrierConfigManager::class.java,
-                    *CarrierConfigManager::class.java.declaredClasses,
-                )
-            val fields =
-                listOf(
-                    CarrierConfigManager::class.java,
-                    *CarrierConfigManager::class.java.declaredClasses,
-                ).map {
-                    it.declaredFields.filter { field ->
-                        field.name != "KEY_PREFIX" &&
-                            field.name.startsWith(
-                                "KEY_",
-                            )
-                    }
-                }.flatten()
-            rowsToLoad = fields.size
-            sections =
-                classes.map { cls ->
-                    Section(
-                        name = cls.simpleName,
-                        rows =
-                            cls.declaredFields.filter { field -> field.name != "KEY_PREFIX" && field.name.startsWith("KEY_") }.map {
-                                rowsLoaded += 1
-                                fieldToDataRow(moder, it)
-                            },
+    LaunchedEffect(moder) {
+        try {
+            withContext(Dispatchers.Default) {
+                val classes =
+                    listOf(
+                        CarrierConfigManager::class.java,
+                        *CarrierConfigManager::class.java.declaredClasses,
                     )
-                }
+                val fields =
+                    listOf(
+                        CarrierConfigManager::class.java,
+                        *CarrierConfigManager::class.java.declaredClasses,
+                    ).map {
+                        it.declaredFields.filter { field ->
+                            field.name != "KEY_PREFIX" &&
+                                field.name.startsWith(
+                                    "KEY_",
+                                )
+                        }
+                    }.flatten()
+                rowsToLoad = fields.size
+                sections =
+                    classes.map { cls ->
+                        Section(
+                            name = cls.simpleName,
+                            rows =
+                                cls.declaredFields.filter { field -> field.name != "KEY_PREFIX" && field.name.startsWith("KEY_") }.map {
+                                    rowsLoaded += 1
+                                    fieldToDataRow(moder, it)
+                                },
+                        )
+                    }
+            }
+        } catch (_: IllegalStateException) {
+            sections = emptyList()
+        } finally {
             loading = false
         }
     }
@@ -404,174 +415,178 @@ fun Editor(
         return
     }
 
-    LazyColumn {
-        stickyHeader {
-            Row(
-                modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton({ showFieldNameInsteadOfKey = !showFieldNameInsteadOfKey }) {
-                    if (showFieldNameInsteadOfKey) {
-                        Text("a")
-                    } else {
-                        Text("A")
-                    }
-                }
-                TextField(
-                    searchKeyword,
-                    modifier =
-                        Modifier.fillMaxWidth().weight(
-                            1f,
-                        ),
-                    label = { Text(stringResource(R.string.search)) },
-                    onValueChange = {
-                        searchKeyword =
-                            it
-                    },
-                    singleLine = true,
-                    trailingIcon = {
-                        if (searchKeyword.isNotEmpty()) {
-                            IconButton({ searchKeyword = "" }) {
-                                Icon(Icons.Filled.Clear, contentDescription = "Localized description")
-                            }
+    CompositionLocalProvider(LocalSubscriptionActionGate provides actionGate) {
+        LazyColumn {
+            stickyHeader {
+                Row(
+                    modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton({ showFieldNameInsteadOfKey = !showFieldNameInsteadOfKey }) {
+                        if (showFieldNameInsteadOfKey) {
+                            Text("a")
+                        } else {
+                            Text("A")
                         }
-                    },
-                )
-            }
-        }
-        filteredSections.forEachIndexed { sectionIndex, section ->
-            item {
-                Box(
-                    modifier =
-                        Modifier
-                            .background(MaterialTheme.colorScheme.secondaryContainer)
-                            .fillMaxWidth(),
-                ) {
-                    Text(section.name, modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp))
-                }
-            }
-            items(section.rows) { row ->
-                Surface(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
-                ) {
-                    ClickablePropertyView(
-                        label =
-                            if (showFieldNameInsteadOfKey) {
-                                row.fieldName
-                            } else {
-                                row.key
-                            },
-                        value = row.toString(),
-                        labelFontFamily = FontFamily.Monospace,
-                        onClick =
-                            if (getValueTypeFromFieldName(row.fieldName) != ValueType.Unknown) {
-                                {
-                                    sectionIndexOfEditingData = sectionIndex
-                                    rowIndexOfEditingData = sections[sectionIndex].rows.indexOf(row)
-                                    dataToEdit = row
+                    }
+                    TextField(
+                        searchKeyword,
+                        modifier =
+                            Modifier.fillMaxWidth().weight(
+                                1f,
+                            ),
+                        label = { Text(stringResource(R.string.search)) },
+                        onValueChange = {
+                            searchKeyword =
+                                it
+                        },
+                        singleLine = true,
+                        trailingIcon = {
+                            if (searchKeyword.isNotEmpty()) {
+                                IconButton({ searchKeyword = "" }) {
+                                    Icon(Icons.Filled.Clear, contentDescription = "Localized description")
                                 }
-                            } else {
-                                null
-                            },
+                            }
+                        },
                     )
                 }
             }
-        }
-    }
-
-    fun updateRow(data: BaseDataRow) {
-        if (data.rawValue == null) return
-        when (data) {
-            is DataRow -> {
-                when (data.fieldType) {
-                    ValueType.Int -> moder.updateCarrierConfig(data.key, data.typedValue as Int)
-                    ValueType.Long -> moder.updateCarrierConfig(data.key, data.typedValue as Long)
-                    ValueType.Bool -> moder.updateCarrierConfig(data.key, data.typedValue as Boolean)
-                    ValueType.String -> moder.updateCarrierConfig(data.key, data.typedValue as String)
-                    else -> {}
+            filteredSections.forEachIndexed { sectionIndex, section ->
+                item {
+                    Box(
+                        modifier =
+                            Modifier
+                                .background(MaterialTheme.colorScheme.secondaryContainer)
+                                .fillMaxWidth(),
+                    ) {
+                        Text(section.name, modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp))
+                    }
+                }
+                items(section.rows) { row ->
+                    Surface(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                    ) {
+                        ClickablePropertyView(
+                            label =
+                                if (showFieldNameInsteadOfKey) {
+                                    row.fieldName
+                                } else {
+                                    row.key
+                                },
+                            value = row.toString(),
+                            labelFontFamily = FontFamily.Monospace,
+                            onClick =
+                                if (getValueTypeFromFieldName(row.fieldName) != ValueType.Unknown) {
+                                    {
+                                        sectionIndexOfEditingData = sectionIndex
+                                        rowIndexOfEditingData = sections[sectionIndex].rows.indexOf(row)
+                                        dataToEdit = row
+                                    }
+                                } else {
+                                    null
+                                },
+                        )
+                    }
                 }
             }
-            is ListDataRow -> {
-                when (data.fieldType) {
-                    ValueType.Int -> moder.updateCarrierConfig(data.key, (data.typedValue as List<Int>).toIntArray())
-                    ValueType.Long -> moder.updateCarrierConfig(data.key, (data.typedValue as List<Long>).toLongArray())
-                    ValueType.Bool -> moder.updateCarrierConfig(data.key, (data.typedValue as List<Boolean>).toBooleanArray())
-                    ValueType.String -> moder.updateCarrierConfig(data.key, (data.typedValue as List<String>).toTypedArray())
-                    else -> {}
+        }
+
+        fun updateRow(data: BaseDataRow) {
+            if (data.rawValue == null) return
+            when (data) {
+                is DataRow -> {
+                    when (data.fieldType) {
+                        ValueType.Int -> moder.updateCarrierConfig(data.key, data.typedValue as Int)
+                        ValueType.Long -> moder.updateCarrierConfig(data.key, data.typedValue as Long)
+                        ValueType.Bool -> moder.updateCarrierConfig(data.key, data.typedValue as Boolean)
+                        ValueType.String -> moder.updateCarrierConfig(data.key, data.typedValue as String)
+                        else -> {}
+                    }
+                }
+                is ListDataRow -> {
+                    when (data.fieldType) {
+                        ValueType.Int -> moder.updateCarrierConfig(data.key, (data.typedValue as List<Int>).toIntArray())
+                        ValueType.Long -> moder.updateCarrierConfig(data.key, (data.typedValue as List<Long>).toLongArray())
+                        ValueType.Bool -> moder.updateCarrierConfig(data.key, (data.typedValue as List<Boolean>).toBooleanArray())
+                        ValueType.String -> moder.updateCarrierConfig(data.key, (data.typedValue as List<String>).toTypedArray())
+                        else -> {}
+                    }
                 }
             }
+            val updatedData = fieldToDataRow(moder, data.field)
+            val newRows = sections[sectionIndexOfEditingData].rows.replaceAt(rowIndexOfEditingData, updatedData)
+            val newSections = sections.replaceAt(sectionIndexOfEditingData, sections[sectionIndexOfEditingData].copy(rows = newRows))
+            sections = newSections
         }
-        val updatedData = fieldToDataRow(moder, data.field)
-        val newRows = sections[sectionIndexOfEditingData].rows.replaceAt(rowIndexOfEditingData, updatedData)
-        val newSections = sections.replaceAt(sectionIndexOfEditingData, sections[sectionIndexOfEditingData].copy(rows = newRows))
-        sections = newSections
-    }
 
-    @Composable
-    fun renderEditDialog(data: BaseDataRow) {
-        Dialog(
-            onDismissRequest = { dataToEdit = null },
-            properties = DialogProperties(),
-        ) {
-            Card(
-                colors =
-                    CardDefaults.cardColors(
-                        containerColor = AlertDialogDefaults.containerColor,
-                        contentColor = AlertDialogDefaults.textContentColor,
-                    ),
+        @Composable
+        fun renderEditDialog(data: BaseDataRow) {
+            Dialog(
+                onDismissRequest = { dataToEdit = null },
+                properties = DialogProperties(),
             ) {
-                Column {
-                    Row(modifier = Modifier.padding(16.dp)) {
-                        Column {
-                            Text(stringResource(R.string.edit_value), fontWeight = FontWeight.Medium, fontSize = 24.sp)
-                            Text(
-                                "${data.key} (${data.fieldName})",
-                                modifier = Modifier.padding(top = 6.dp),
-                                fontFamily = FontFamily.Monospace,
-                            )
+                Card(
+                    colors =
+                        CardDefaults.cardColors(
+                            containerColor = AlertDialogDefaults.containerColor,
+                            contentColor = AlertDialogDefaults.textContentColor,
+                        ),
+                ) {
+                    Column {
+                        Row(modifier = Modifier.padding(16.dp)) {
+                            Column {
+                                Text(stringResource(R.string.edit_value), fontWeight = FontWeight.Medium, fontSize = 24.sp)
+                                Text(
+                                    "${data.key} (${data.fieldName})",
+                                    modifier = Modifier.padding(top = 6.dp),
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            }
                         }
-                    }
-                    Row(modifier = Modifier.padding(8.dp).fillMaxWidth()) {
-                        when (data) {
-                            is DataRow -> SingleValueEditor(data) { dataToEdit = data.copy(rawValue = it) }
-                            is ListDataRow ->
-                                MultiValueEditor(data) {
-                                    dataToEdit = data.copy(rawValue = it)
-                                }
-                            else -> Box(modifier = Modifier.fillMaxWidth())
+                        Row(modifier = Modifier.padding(8.dp).fillMaxWidth()) {
+                            when (data) {
+                                is DataRow -> SingleValueEditor(data) { dataToEdit = data.copy(rawValue = it) }
+                                is ListDataRow ->
+                                    MultiValueEditor(data) {
+                                        dataToEdit = data.copy(rawValue = it)
+                                    }
+                                else -> Box(modifier = Modifier.fillMaxWidth())
+                            }
                         }
-                    }
-                    Row(modifier = Modifier.align(Alignment.End).padding(top = 16.dp)) {
-                        TextButton(
-                            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.primary),
-                            modifier = Modifier.padding(end = 8.dp),
-                            shape = ButtonDefaults.outlinedShape,
-                            onClick = { dataToEdit = null },
-                        ) { Text(stringResource(R.string.dismiss)) }
-                        TextButton(
-                            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.primary),
-                            shape = ButtonDefaults.outlinedShape,
-                            colors =
-                                ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary,
-                                ),
-                            onClick = {
-                                dataToEdit = null
-                                saving = true
-                                updateRow(data)
-                                saving = false
-                            },
-                        ) { Text(stringResource(R.string.confirm)) }
+                        Row(modifier = Modifier.align(Alignment.End).padding(top = 16.dp)) {
+                            TextButton(
+                                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.primary),
+                                modifier = Modifier.padding(end = 8.dp),
+                                shape = ButtonDefaults.outlinedShape,
+                                onClick = { dataToEdit = null },
+                            ) { Text(stringResource(R.string.dismiss)) }
+                            TextButton(
+                                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.primary),
+                                shape = ButtonDefaults.outlinedShape,
+                                colors =
+                                    ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                    ),
+                                onClick = {
+                                    actionGate.run {
+                                        dataToEdit = null
+                                        saving = true
+                                        updateRow(data)
+                                        saving = false
+                                    }
+                                },
+                            ) { Text(stringResource(R.string.confirm)) }
+                        }
                     }
                 }
             }
         }
-    }
 
-    dataToEdit?.let { data ->
-        renderEditDialog(data)
+        dataToEdit?.let { data ->
+            renderEditDialog(data)
+        }
     }
 }

@@ -18,6 +18,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.bluehouse.enablevolte.LocalSubscriptionActionGate
 import dev.bluehouse.enablevolte.R
 
 @Composable
@@ -30,6 +31,10 @@ fun BooleanPropertyView(
     minSdk: Int = Build.VERSION.SDK_INT,
     onClick: ((Boolean) -> Unit)? = null,
 ) {
+    val guardedOnClick =
+        onClick?.let {
+            LocalSubscriptionActionGate.current?.guard(it) ?: it
+        }
     val localEnabled = enabled && Build.VERSION.SDK_INT >= minSdk
 
     if (toggled == null) {
@@ -39,10 +44,10 @@ fun BooleanPropertyView(
         }
         return
     }
-    if (onClick != null) {
+    if (guardedOnClick != null) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp, bottom = 12.dp)) {
             Text(text = label, modifier = Modifier.weight(1F), fontSize = 18.sp)
-            Switch(checked = toggled, enabled = localEnabled, onCheckedChange = onClick)
+            Switch(checked = toggled, enabled = localEnabled, onCheckedChange = guardedOnClick)
         }
     } else {
         Column(modifier = Modifier.padding(top = 12.dp, bottom = 12.dp)) {
